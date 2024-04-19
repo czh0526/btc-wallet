@@ -1,12 +1,15 @@
 package main
 
 import (
+	"fmt"
 	"os"
 )
 
 func main() {
-	os.Mkdir("btc-wallet", os.ModePerm)
+	currDir, err := os.Getwd()
+	if err != nil {
+		panic(fmt.Sprintf("获取当前路径失败：err = %v"))
+	}
 
-	walletSetup := &walletsetup.Create{}
-
+	walletdb := wallet.NewDB(currDir)
 }

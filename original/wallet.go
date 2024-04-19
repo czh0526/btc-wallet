@@ -5,7 +5,7 @@
    SPDX-License-Identifier: Apache-2.0
 */
 
-package main
+package original
 
 import (
 	"encoding/hex"
@@ -17,7 +17,7 @@ import (
 	"os"
 )
 
-func main() {
+func CreateWallet() {
 	privKey, err := btcec.NewPrivateKey()
 	if err != nil {
 		log.Fatalf("generate private key failed, err = %v", err)
