@@ -5,12 +5,12 @@ import (
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/czh0526/btc-wallet/key"
 	"github.com/czh0526/btc-wallet/seed"
-	"os"
-
 	"github.com/czh0526/btc-wallet/wallet"
+	"os"
+	"testing"
 )
 
-func main() {
+func TestBtcWallet(t *testing.T) {
 	currDir, err := os.Getwd()
 	if err != nil {
 		panic(fmt.Sprintf("获取当前路径失败：err = %v", err))
@@ -39,6 +39,8 @@ func main() {
 		if err != nil {
 			panic(fmt.Sprintf("生成`RootKey`失败: %v", err))
 		}
+
+		fmt.Printf("rootKey = %v \n", rootKey)
 	}
 
 	defer func() {
