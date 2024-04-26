@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/czh0526/btc-wallet/key"
+	"github.com/czh0526/btc-wallet/original"
 	"github.com/czh0526/btc-wallet/seed"
 	"github.com/czh0526/btc-wallet/wallet"
 	"os"
@@ -21,7 +22,7 @@ func TestBtcWallet(t *testing.T) {
 		panic(fmt.Sprintf("创建钱包文件夹失败：err = %v", err))
 	}
 
-	walletDB, isNew, err := wallet.OpenDB(walletDir)
+	walletDB, isNew, err := original.OpenDB(walletDir)
 	if err != nil {
 		panic(fmt.Sprintf("创建钱包数据库失败：err = %v", err))
 	}

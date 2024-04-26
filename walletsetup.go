@@ -1,12 +1,15 @@
 package main
 
 import (
+	"fmt"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/czh0526/btc-wallet/internal/legacy/keystore"
+	"github.com/czh0526/btc-wallet/internal/prompt"
 	"github.com/czh0526/btc-wallet/wallet"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 func networkDir(dataDir string, chainParams *chaincfg.Params) string {
@@ -36,4 +39,21 @@ func createWallet(cfg *config) error {
 		}
 	}
 
+	if legacyKeyStore != nil {
+
+	}
+
+	privPass, _ := prompt.PrivatePass()
+	pubPass, _ := prompt.PublicPass()
+	seed, _ := prompt.Seed()
+
+	fmt.Println("Creating the wallet...")
+	w, err := loader.CreateNewWallet(pubPass, privPass, seed, time.Now())
+	if err != nil {
+		return err
+	}
+
+	w.Manager.Close()
+	fmt.Println("The wallet has been created successfully!")
+	return nil
 }

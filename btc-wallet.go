@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"github.com/czh0526/btc-wallet/wallet"
+	_ "github.com/czh0526/btc-wallet/walletdb/bdb"
 	"os"
 	"runtime"
 )

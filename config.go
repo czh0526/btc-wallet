@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/czh0526/btc-wallet/internal/cfgutil"
 	"github.com/czh0526/btc-wallet/wallet"
+	"github.com/jessevdk/go-flags"
 	"os"
 	"path/filepath"
 	"time"
@@ -78,7 +79,7 @@ type config struct {
 func loadConfig() (*config, []string, error) {
 	cfg := config{
 		DebugLevel:             "info",
-		ConfigFile:             "/Users/zhihongcai/Library/Application Support/Btcwallet/btcwallet.conf",
+		ConfigFile:             "/Users/zhihongcai/Library/Application Support/Btcwallet/btc-wallet.conf",
 		AppDataDir:             "/Users/zhihongcai/Library/Application Support/Btcwallet",
 		LogDir:                 "/Users/zhihongcai/Library/Application Support/Btcwallet/logs/mainnet",
 		WalletPass:             "public",
@@ -95,6 +96,29 @@ func loadConfig() (*config, []string, error) {
 		BanDuration:            time.Hour * 24,
 		BanThreshold:           uint32(100),
 		DBTimeout:              60 * time.Second,
+	}
+
+	preCfg := cfg
+	_, err := flags.Parse(&preCfg)
+	if err != nil {
+		if e, ok := err.(*flags.Error); !ok || e.Type != flags.ErrHelp {
+			fmt.Println("命令行错误.")
+		}
+		return nil, nil, err
+	}
+
+	parser := flags.NewParser(&cfg, flags.Default)
+	err = flags.NewIniParser(parser).ParseFile(preCfg.ConfigFile)
+	if err != nil {
+		fmt.Printf("Failed to parse config file %s: %s\n", preCfg.ConfigFile, err)
+	}
+
+	_, err = parser.Parse()
+	if err != nil {
+		if e, ok := err.(*flags.Error); !ok || e.Type != flags.ErrHelp {
+			parser.WriteHelp(os.Stderr)
+		}
+		return nil, nil, err
 	}
 
 	netDir := networkDir(cfg.AppDataDir, activeNet.Params)
