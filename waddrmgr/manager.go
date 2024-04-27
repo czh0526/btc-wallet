@@ -41,7 +41,7 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 	if !isWatchingOnly {
 		defaultScope = ScopeAddrMap
 	}
-	if err := createManageNS(ns, defaultScope); err != nil {
+	if err := createManagerNS(ns, defaultScope); err != nil {
 		return maybeConvertDbError(err)
 	}
 

@@ -38,4 +38,23 @@ func createManagerNS(ns walletdb.ReadWriteBucket,
 		str := "failed to create scope schemas"
 		return managerError(ErrDatabase, str, err)
 	}
+
+	for scope, scopeSchema := range defaultScopes {
+		scope, scopeSchema := scope, scopeSchema
+
+		scopeKey := scopeToBytes(&scope)
+		schemaBytes := scopeSchemaToBytes(&scopeSchema)
+		err := scopeSchemas.Put(scopeKey, schemaBytes)
+		if err != nil {
+			return err
+		}
+
+		err = createScopedManagerNS(scopeBucket, &scope)
+	}
+}
+
+const scopeKeySize = 8
+
+func scopeToBytes(scope KeyScope) [scopeKeySize]byte {
+
 }
