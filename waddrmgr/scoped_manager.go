@@ -1,5 +1,12 @@
 package waddrmgr
 
+import (
+	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcutil/hdkeychain"
+	"github.com/lightninglabs/neutrino/cache/lru"
+	"sync"
+)
+
 type KeyScope struct {
 	Purpose uint32
 	Coin    uint32
@@ -58,7 +65,56 @@ var (
 	}
 )
 
+type accountInfo struct {
+	acctName string
+	acctType accountType
+
+	acctKeyEncrypted []byte
+	acctKeyPriv      *hdkeychain.ExtendedKey
+	acctKeyPub       *hdkeychain.ExtendedKey
+
+	nextExternalIndex uint32
+	lastExternalAddr  ManagedAddress
+
+	nextInternalAddr uint32
+	lastInternalasr  ManagedAddress
+
+	addrSchema           *ScopeAddrSchema
+	masterKeyFingerprint uint32
+}
+
+type unlockDeriveInfo struct {
+	managedAddr ManagedAddress
+	branch      uint32
+	index       uint32
+}
+
+type DerivationPath struct {
+	InternalAccount      uint32
+	Account              uint32
+	Branch               uint32
+	Index                uint32
+	MasterKeyFingerprint uint32
+}
+
+type cachedKey struct {
+	key btcec.PrivateKey
+}
+
+func (c *cachedKey) Size() (uint64, error) {
+	return 1, nil
+}
+
 type ScopedKeyManager struct {
+	scope          KeyScope
+	addrSchema     ScopeAddrSchema
+	rootManager    *Manager
+	addrs          map[addrKey]ManagedAddress
+	acctInfo       map[uint32]*accountInfo
+	deriveOnUnlock []*unlockDeriveInfo
+	privKeyCache   *lru.Cache[DerivationPath, *cachedKey]
+
+	mtx sync.RWMutex
 }
 
 func (s *ScopedKeyManager) Close() {

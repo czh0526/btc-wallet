@@ -1,8 +1,8 @@
 package original
 
 import (
-	"github.com/btcsuite/btcwallet/walletdb"
-	_ "github.com/btcsuite/btcwallet/walletdb/bdb"
+	"github.com/czh0526/btc-wallet/walletdb"
+	_ "github.com/czh0526/btc-wallet/walletdb/bdb"
 	"github.com/stretchr/testify/assert"
 	"os"
 	"path/filepath"

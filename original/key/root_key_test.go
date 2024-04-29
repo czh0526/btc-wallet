@@ -9,7 +9,7 @@ package key
 
 import (
 	"fmt"
-	"github.com/czh0526/btc-wallet/seed"
+	"github.com/czh0526/btc-wallet/original/seed"
 	"github.com/stretchr/testify/assert"
 	"testing"
 )

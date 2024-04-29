@@ -3,9 +3,9 @@ package main
 import (
 	"fmt"
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
-	"github.com/czh0526/btc-wallet/key"
 	"github.com/czh0526/btc-wallet/original"
-	"github.com/czh0526/btc-wallet/seed"
+	"github.com/czh0526/btc-wallet/original/key"
+	"github.com/czh0526/btc-wallet/original/seed"
 	"github.com/czh0526/btc-wallet/wallet"
 	"os"
 	"testing"

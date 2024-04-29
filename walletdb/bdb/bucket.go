@@ -53,8 +53,7 @@ func (b *bucket) DeleteNestedBucket(key []byte) error {
 }
 
 func (b *bucket) Put(key, value []byte) error {
-	//TODO implement me
-	panic("implement me")
+	return convertErr((*bbolt.Bucket)(b).Put(key, value))
 }
 
 func (b *bucket) Delete(key []byte) error {
