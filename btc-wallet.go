@@ -47,6 +47,6 @@ func walletMain() error {
 	})
 
 	<-interruptHandlersDone
-	fmt.Println("Shutdown complete")
+	fmt.Println("\nShutdown complete")
 	return nil
 }

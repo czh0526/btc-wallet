@@ -33,8 +33,7 @@ func (db *db) Copy(w io.Writer) error {
 }
 
 func (db *db) Close() error {
-	//TODO implement me
-	panic("implement me")
+	return convertErr((*bbolt.DB)(db).Close())
 }
 
 func (db *db) PrintStats() string {

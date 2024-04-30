@@ -8,6 +8,7 @@ import (
 	"github.com/czh0526/btc-wallet/waddrmgr"
 	"github.com/czh0526/btc-wallet/walletdb"
 	"github.com/czh0526/btc-wallet/wtxmgr"
+	"sync"
 	"time"
 )
 
@@ -24,25 +25,99 @@ type Wallet struct {
 	db      walletdb.DB
 	Manager *waddrmgr.Manager
 	TxStore *wtxmgr.Store
+
+	started bool
+	quit    chan struct{}
+	quitMu  sync.Mutex
+
+	wg sync.WaitGroup
 }
 
 func (w *Wallet) Start() {
-	fmt.Printf("Wallet::Start() was not yet implemented \n")
+	fmt.Printf("Wallet::Start() was running ... \n")
+	w.quitMu.Lock()
+
+	select {
+	case <-w.quit:
+		w.WaitForShutdown()
+		w.quit = make(chan struct{})
+	default:
+		if w.started {
+			w.quitMu.Unlock()
+			return
+		}
+		w.started = true
+	}
+	w.quitMu.Unlock()
+
+	w.wg.Add(2)
+	go w.txCreator()
+	go w.walletLocker()
 }
 
 func (w *Wallet) Stop() {
-	fmt.Printf("Wallet::Stop() was not yet implemented \n")
+	quit := w.quitChan()
+
+	select {
+	case <-quit:
+	default:
+		fmt.Printf("Wallet::Stop() send quit signal to chan \n")
+		close(quit)
+	}
 }
 
 func (w *Wallet) WaitForShutdown() {
-	fmt.Printf("Wallet::WaitForShutdown() was not yet implemented \n")
+	w.wg.Wait()
+}
+
+func (w *Wallet) txCreator() {
+	quit := w.quitChan()
+out:
+	for {
+		select {
+		case <-quit:
+			break out
+		}
+	}
+	w.wg.Done()
+	fmt.Println("txCreator finished")
+}
+
+func (w *Wallet) walletLocker() {
+	var timeout <-chan time.Time
+	quit := w.quitChan()
+out:
+	for {
+		select {
+		case <-quit:
+			break out
+		case <-timeout:
+		}
+	}
+	w.wg.Done()
+	fmt.Println("walletLocker finished")
+}
+
+func (w *Wallet) quitChan() chan struct{} {
+	w.quitMu.Lock()
+	c := w.quit
+	w.quitMu.Unlock()
+	return c
 }
 
 func CreateWithCallback(db walletdb.DB, pubPass, privPass []byte,
 	rootKey *hdkeychain.ExtendedKey, params *chaincfg.Params,
 	birthday time.Time, cb func(walletdb.ReadWriteTx) error) error {
 
-	return create(db, pubPass, privPass, rootKey, params, birthday, false, cb)
+	return create(
+		db, pubPass, privPass, rootKey, params, birthday, false, cb)
+}
+
+func CreateWatchingOnlyWithCallback(db walletdb.DB, pubPass []byte,
+	params *chaincfg.Params, birthday time.Time, cb func(walletdb.ReadWriteTx) error) error {
+
+	return create(
+		db, pubPass, nil, nil, params, birthday, true, cb)
 }
 
 func create(db walletdb.DB, pubPass, privPass []byte,
@@ -103,6 +178,7 @@ func OpenWithRetry(db walletdb.DB, pubPass []byte,
 		addrMgr *waddrmgr.Manager
 		txMgr   *wtxmgr.Store
 	)
+	fmt.Println("【 Opened wallet 】")
 
 	err := walletdb.Update(db, func(tx walletdb.ReadWriteTx) error {
 		var err error
@@ -131,12 +207,11 @@ func OpenWithRetry(db walletdb.DB, pubPass []byte,
 		return nil, err
 	}
 
-	fmt.Println("Opened wallet")
-
 	w := &Wallet{
 		db:      db,
 		Manager: addrMgr,
 		TxStore: txMgr,
+		quit:    make(chan struct{}),
 	}
 
 	return w, nil

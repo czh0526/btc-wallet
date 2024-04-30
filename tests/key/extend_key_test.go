@@ -9,12 +9,17 @@ import (
 )
 
 func TestNewMaster(t *testing.T) {
+
+	// 获取网络配置参数
+	netParams := netparams.MainNetParams
+	params := netParams.Params
+	//params := chaincfg.MainNetParams
+
+	// 生成随机数
 	hdSeed, err := hdkeychain.GenerateSeed(hdkeychain.RecommendedSeedLen)
 	assert.NoError(t, err)
 
-	netParams := netparams.MainNetParams
-	params := netParams.Params
-
+	// 生成主私钥
 	masterKey, err := hdkeychain.NewMaster(hdSeed, params)
 	assert.NoError(t, err)
 	fmt.Printf("master key \t=> %v \n", masterKey)

@@ -47,8 +47,7 @@ type Loader struct {
 }
 
 func NewLoader(chainParams *chaincfg.Params, dbDirPath string,
-	noFreelistSync bool, timeout time.Duration, recoveryWindow uint32,
-) *Loader {
+	noFreelistSync bool, timeout time.Duration, recoveryWindow uint32) *Loader {
 
 	cfg := defaultLoaderConfig()
 
@@ -61,6 +60,29 @@ func NewLoader(chainParams *chaincfg.Params, dbDirPath string,
 		recoveryWindow: recoveryWindow,
 		localDB:        true,
 	}
+}
+
+func NewLoaderWithDB(chainParams *chaincfg.Params, recoveryWindow uint32,
+	db walletdb.DB, walletExists func() (bool, error)) (*Loader, error) {
+
+	if db == nil {
+		return nil, fmt.Errorf("no DB provided")
+	}
+
+	if walletExists == nil {
+		return nil, fmt.Errorf("unable to check if wallet exists")
+	}
+
+	cfg := defaultLoaderConfig()
+
+	return &Loader{
+		cfg:            cfg,
+		chainParams:    chainParams,
+		recoveryWindow: recoveryWindow,
+		localDB:        false,
+		walletExists:   walletExists,
+		db:             db,
+	}, nil
 }
 
 func (l *Loader) CreateNewWallet(pubPassphrase, privPassphrase, seed []byte,
@@ -129,7 +151,11 @@ func (l *Loader) createNewWallet(pubPassphrase, privPassphrase []byte, rootKey *
 	}
 
 	if isWatchingOnly {
-		return nil, errors.New("watching only wallet not yet implemented")
+		err := CreateWatchingOnlyWithCallback(
+			l.db, pubPassphrase, l.chainParams, bday, l.walletCreated)
+		if err != nil {
+			return nil, err
+		}
 	} else {
 		err = CreateWithCallback(
 			l.db, pubPassphrase, privPassphrase, rootKey,
@@ -185,26 +211,34 @@ func (l *Loader) OpenExistingWallet(pubPassphrase []byte,
 		}
 		return nil, err
 	}
+	w.Start()
 
+	l.onLoaded(w)
 	return w, nil
+}
+
+func (l *Loader) onLoaded(w *Wallet) {
+	l.wallet = w
 }
 
 func (l *Loader) UnloadWallet() error {
 	defer l.mu.Unlock()
 	l.mu.Lock()
 
-	if l.wallet != nil {
+	if l.wallet == nil {
 		return ErrNotLoaded
 	}
 
 	l.wallet.Stop()
 	l.wallet.WaitForShutdown()
+	fmt.Println("wallet was shutdown")
 	if l.localDB {
 		err := l.db.Close()
 		if err != nil {
 			return err
 		}
 	}
+	fmt.Println("wallet db was closed")
 
 	l.wallet = nil
 	l.db = nil

@@ -29,7 +29,7 @@ func mainInterruptHandler() {
 	for {
 		select {
 		case sig := <-interruptChannel:
-			fmt.Printf("Received signal (%s). Shutting down...", sig)
+			fmt.Printf("Received signal (%s). Shutting down... \n", sig)
 			invokeCallbacks()
 			return
 		case handler := <-addHandlerChannel:

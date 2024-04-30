@@ -23,6 +23,7 @@ func networkDir(dataDir string, chainParams *chaincfg.Params) string {
 }
 
 func createWallet(cfg *config) error {
+
 	netDir := networkDir(cfg.AppDataDir, activeNet.Params)
 	loader := wallet.NewLoader(
 		activeNet.Params, netDir, true, cfg.DBTimeout, 250)
