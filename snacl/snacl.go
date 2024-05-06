@@ -15,6 +15,10 @@ import (
 const (
 	KeySize   = 32
 	NonceSize = 24
+
+	DefaultN = 16384
+	DefaultR = 8
+	DefaultP = 1
 )
 
 var (
@@ -96,6 +100,7 @@ func (sk *SecretKey) Marshal() []byte {
 
 	marshalled := make([]byte, KeySize+sha256.Size+24)
 
+	// Salt + Digest + N + R + P
 	b := marshalled
 	copy(b[:KeySize], params.Salt[:])
 	b = b[KeySize:]
@@ -108,7 +113,31 @@ func (sk *SecretKey) Marshal() []byte {
 	binary.LittleEndian.PutUint64(b[:8], uint64(params.P))
 
 	return marshalled
+}
 
+func (sk *SecretKey) Unmarshal(marshalled []byte) error {
+	if sk.Key == nil {
+		sk.Key = (*CryptoKey)(&[KeySize]byte{})
+	}
+
+	if len(marshalled) != KeySize+sha256.Size+24 {
+		return ErrMalformed
+	}
+
+	params := &sk.Parameters
+	copy(params.Salt[:], marshalled[:KeySize])
+	marshalled = marshalled[KeySize:]
+
+	copy(params.Digest[:], marshalled[:sha256.Size])
+	marshalled = marshalled[sha256.Size:]
+
+	params.N = int(binary.LittleEndian.Uint64(marshalled[:8]))
+	marshalled = marshalled[8:]
+	params.R = int(binary.LittleEndian.Uint64(marshalled[:8]))
+	marshalled = marshalled[8:]
+	params.P = int(binary.LittleEndian.Uint64(marshalled[:8]))
+
+	return nil
 }
 
 func (sk *SecretKey) Zero() {

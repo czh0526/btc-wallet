@@ -506,6 +506,93 @@ func fetchWriteScopeBucket(ns walletdb.ReadWriteBucket, scope *KeyScope) (wallet
 	return scopedBucket, nil
 }
 
+func fetchManagerVersion(ns walletdb.ReadBucket) (uint32, error) {
+	mainBucket := ns.NestedReadBucket(mainBucketName)
+	verBytes := mainBucket.Get(mgrVersionName)
+	if verBytes == nil {
+		str := "required version number not stored in database"
+		return 0, managerError(ErrDatabase, str, nil)
+	}
+
+	version := binary.LittleEndian.Uint32(verBytes)
+	return version, nil
+}
+
+func fetchMasterKeyParams(ns walletdb.ReadBucket) ([]byte, []byte, error) {
+	bucket := ns.NestedReadBucket(mainBucketName)
+
+	val := bucket.Get(masterPubKeyName)
+	if val == nil {
+		str := "required master public key parameters not stored in database"
+		return nil, nil, managerError(ErrDatabase, str, nil)
+	}
+	pubParams := make([]byte, len(val))
+	copy(pubParams, val)
+
+	var privParams []byte
+	val = bucket.Get(masterPrivKeyName)
+	if val != nil {
+		privParams = make([]byte, len(val))
+		copy(privParams, val)
+	}
+
+	return pubParams, privParams, nil
+}
+
+func fetchWatchingOnly(ns walletdb.ReadBucket) (bool, error) {
+	bucket := ns.NestedReadBucket(mainBucketName)
+
+	buf := bucket.Get(watchingOnlyName)
+	if len(buf) != 1 {
+		str := "malformed watching-only flag stored in database"
+		return false, managerError(ErrDatabase, str, nil)
+	}
+
+	return buf[0] != 0, nil
+}
+
+func fetchCryptoKeys(ns walletdb.ReadBucket) ([]byte, []byte, []byte, error) {
+	bucket := ns.NestedReadBucket(mainBucketName)
+
+	val := bucket.Get(cryptoPubKeyName)
+	if val == nil {
+		str := "required encrypted crypto public key parameters not stored in database"
+		return nil, nil, nil, managerError(ErrDatabase, str, nil)
+	}
+	pubKey := make([]byte, len(val))
+	copy(pubKey, val)
+
+	var privKey []byte
+	val = bucket.Get(cryptoPrivKeyName)
+	if val != nil {
+		privKey = make([]byte, len(val))
+		copy(privKey, val)
+	}
+
+	var scriptKey []byte
+	val = bucket.Get(cryptoScriptKeyName)
+	if val != nil {
+		scriptKey = make([]byte, len(val))
+		copy(scriptKey, val)
+	}
+
+	return pubKey, privKey, scriptKey, nil
+}
+
+func fetchBirthday(ns walletdb.ReadBucket) (time.Time, error) {
+	var t time.Time
+
+	bucket := ns.NestedReadBucket(syncBucketName)
+	birthdayTimestamp := bucket.Get(birthdayName)
+	if len(birthdayTimestamp) != 8 {
+		str := "malformed birthday stored in database"
+		return t, managerError(ErrDatabase, str, nil)
+	}
+
+	t = time.Unix(int64(binary.BigEndian.Uint64(birthdayTimestamp)), 0)
+	return t, nil
+}
+
 const scopeKeySize = 8
 
 func scopeToBytes(scope *KeyScope) [scopeKeySize]byte {

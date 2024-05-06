@@ -2,9 +2,9 @@ package waddrmgr
 
 import (
 	"crypto/rand"
-	"fmt"
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/czh0526/btc-wallet/internal/zero"
 	"github.com/czh0526/btc-wallet/snacl"
 	"github.com/czh0526/btc-wallet/walletdb"
 	"sync"
@@ -90,6 +90,7 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 		config = &DefaultScryptOptions
 	}
 
+	// 使用 pub password 构建一个 Secret Key
 	masterKeyPub, err := newSecretKey(&pubPassphrase, config)
 	if err != nil {
 		str := "failed to master public key"
@@ -123,6 +124,7 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 	var cryptoKeyPrivEnc []byte
 	var cryptoKeyScriptEnc []byte
 	if !isWatchingOnly {
+		// // 使用 private password 构建一个 Secret Key
 		masterKeyPriv, err = newSecretKey(&privPassphrase, config)
 		if err != nil {
 			str := "failed to master private key"
@@ -137,6 +139,7 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 			return managerError(ErrCrypto, str, err)
 		}
 
+		// 生成 Crypto Key Private
 		cryptoKeyPriv, err := newCryptoKey()
 		if err != nil {
 			str := "failed to generate crypto private key"
@@ -144,6 +147,7 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 		}
 		defer cryptoKeyPriv.Zero()
 
+		// 生成 Crypto Key Script
 		cryptoKeyScript, err := newCryptoKey()
 		if err != nil {
 			str := "failed to generate crypto script key"
@@ -151,12 +155,14 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 		}
 		defer cryptoKeyScript.Zero()
 
+		// 用 private Secret Key 加密 private Crypto Key
 		cryptoKeyPrivEnc, err = masterKeyPriv.Encrypt(cryptoKeyPriv.Bytes())
 		if err != nil {
 			str := "failed to encrypt crypto private key"
 			return managerError(ErrCrypto, str, err)
 		}
 
+		// 用 private Secret Key 加密 script Crypto Key
 		cryptoKeyScriptEnc, err = masterKeyPriv.Encrypt(cryptoKeyScript.Bytes())
 		if err != nil {
 			str := "failed to encrypt crypto script key"
@@ -224,8 +230,13 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 func Open(ns walletdb.ReadWriteBucket, pubPassphrase []byte,
 	chainParams *chaincfg.Params) (*Manager, error) {
 
-	fmt.Println("waddrmgr.Open() has not been implemented yet")
-	return &Manager{}, nil
+	exists := managerExists(ns)
+	if !exists {
+		str := "the specified address manager does not exist"
+		return nil, managerError(ErrNoExist, str, nil)
+	}
+
+	return loadManager(ns, pubPassphrase, chainParams)
 }
 
 func (m *Manager) Close() {
@@ -238,6 +249,77 @@ func managerExists(ns walletdb.ReadWriteBucket) bool {
 	}
 	mainBucket := ns.NestedReadBucket(mainBucketName)
 	return mainBucket != nil
+}
+
+func loadManager(ns walletdb.ReadBucket, pubPassphrase []byte,
+	chainParams *chaincfg.Params) (*Manager, error) {
+
+	version, err := fetchManagerVersion(ns)
+	if err != nil {
+		str := "failed to fetch manager version"
+		return nil, managerError(ErrDatabase, str, err)
+	}
+
+	if version < latestMgrVersion {
+		str := "database upgrade required"
+		return nil, managerError(ErrUpgrade, str, nil)
+	} else if version > latestMgrVersion {
+		str := "database version is greater than latest understood version"
+		return nil, managerError(ErrUpgrade, str, nil)
+	}
+
+	watchingOnly, err := fetchWatchingOnly(ns)
+	if err != nil {
+		return nil, maybeConvertDbError(err)
+	}
+
+	masterKeyPubParams, masterKeyPrivParams, err := fetchMasterKeyParams(ns)
+	if err != nil {
+		return nil, maybeConvertDbError(err)
+	}
+
+	cryptoKeyPubEnc, cryptoKeyPrivEnc, cryptoKeyScriptEnc, err := fetchCryptoKeys(ns)
+	if err != nil {
+		return nil, maybeConvertDbError(err)
+	}
+
+	birthday, err := fetchBirthday(ns)
+	if err != nil {
+		return nil, maybeConvertDbError(err)
+	}
+
+	var masterKeyPriv snacl.SecretKey
+	if !watchingOnly {
+		err := masterKeyPriv.Unmarshal(masterKeyPrivParams)
+		if err != nil {
+			str := "failed to unmarshal master private key"
+			return nil, managerError(ErrCrypto, str, err)
+		}
+	}
+
+	var masterKeyPub snacl.SecretKey
+	if err := masterKeyPub.Unmarshal(masterKeyPubParams); err != nil {
+		str := "failed to unmarshal master public key"
+		return nil, managerError(ErrCrypto, str, err)
+	}
+	if err := masterKeyPub.DeriveKey(&pubPassphrase); err != nil {
+		str := "invalid passphrase for master public key"
+		return nil, managerError(ErrWrongPassphrase, str, err)
+	}
+
+	cryptoKeyPub := &cryptoKey{snacl.CryptoKey{}}
+	cryptoKeyPubCT, err := masterKeyPub.Decrypt(cryptoKeyPubEnc)
+	if err != nil {
+		str := "failed to decrypt crypto public key"
+		return nil, managerError(ErrCrypto, str, err)
+	}
+	cryptoKeyPub.CopyBytes(cryptoKeyPubCT)
+	zero.Bytes(cryptoKeyPubCT)
+
+	return newManager(
+		chainParams, &masterKeyPub, &masterKeyPriv,
+		cryptoKeyPub, cryptoKeyPrivEnc, cryptoKeyScriptEnc,
+		birthday, privPassphraseSalt, scopedManagers, watchingOnly)
 }
 
 func newSecretKey(passphrase *[]byte, config *ScryptOptions) (*snacl.SecretKey, error) {

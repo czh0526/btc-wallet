@@ -178,7 +178,7 @@ func OpenWithRetry(db walletdb.DB, pubPass []byte,
 		addrMgr *waddrmgr.Manager
 		txMgr   *wtxmgr.Store
 	)
-	fmt.Println("【 Opened wallet 】")
+	fmt.Println("【 Open wallet 】")
 
 	err := walletdb.Update(db, func(tx walletdb.ReadWriteTx) error {
 		var err error
