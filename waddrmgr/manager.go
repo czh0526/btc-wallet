@@ -7,6 +7,7 @@ import (
 	"github.com/czh0526/btc-wallet/internal/zero"
 	"github.com/czh0526/btc-wallet/snacl"
 	"github.com/czh0526/btc-wallet/walletdb"
+	"github.com/lightninglabs/neutrino/cache/lru"
 	"sync"
 	"time"
 )
@@ -54,7 +55,11 @@ type Manager struct {
 	mtx sync.RWMutex
 
 	scopedManagers map[KeyScope]*ScopedKeyManager
-	closed         bool
+
+	externalAddrSchemas map[AddressType][]KeyScope
+	internalAddrSchemas map[AddressType][]KeyScope
+
+	closed bool
 }
 
 type ScryptOptions struct {
@@ -316,10 +321,70 @@ func loadManager(ns walletdb.ReadBucket, pubPassphrase []byte,
 	cryptoKeyPub.CopyBytes(cryptoKeyPubCT)
 	zero.Bytes(cryptoKeyPubCT)
 
-	return newManager(
+	var privPassphraseSalt [saltSize]byte
+	_, err = rand.Read(privPassphraseSalt[:])
+	if err != nil {
+		str := "failed to read random source for passphrase salt"
+		return nil, managerError(ErrCrypto, str, err)
+	}
+
+	scopedManagers := make(map[KeyScope]*ScopedKeyManager)
+	err = forEachKeyScope(ns, func(scope KeyScope) error {
+		scopeSchema, err := fetchScopeAddrSchema(ns, &scope)
+		if err != nil {
+			return err
+		}
+
+		scopedManagers[scope] = &ScopedKeyManager{
+			scope:      scope,
+			addrSchema: *scopeSchema,
+			addrs:      make(map[addrKey]ManagedAddress),
+			acctInfo:   make(map[uint32]*accountInfo),
+			privKeyCache: lru.NewCache[DerivationPath, *cachedKey](
+				defaultPrivKeyCacheSize,
+			),
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	mgr := newManager(
 		chainParams, &masterKeyPub, &masterKeyPriv,
 		cryptoKeyPub, cryptoKeyPrivEnc, cryptoKeyScriptEnc,
 		birthday, privPassphraseSalt, scopedManagers, watchingOnly)
+
+	for _, scopedManager := range scopedManagers {
+		scopedManager.rootManager = mgr
+	}
+
+	return mgr, nil
+}
+
+func newManager(chainParams *chaincfg.Params, masterKeyPub *snacl.SecretKey,
+	masterKeyPriv *snacl.SecretKey, cryptoKeyPub EncryptorDecryptor,
+	cryptoKeyPrivEncrypted, cryptoKeyScriptEncrypted []byte,
+	birthday time.Time, privPassphraseSalt [saltSize]byte,
+	scopedKeyManagers map[KeyScope]*ScopedKeyManager, watchOnly bool) *Manager {
+
+	m := &Manager{
+		scopedManagers: scopedKeyManagers,
+	}
+
+	for _, sMgr := range m.scopedManagers {
+		externalType := sMgr.AddrSchema().ExternalAddrType
+		internalType := sMgr.AddrSchema().InternalAddrType
+		scope := sMgr.Scope()
+
+		m.externalAddrSchemas[externalType] = append(
+			m.externalAddrSchemas[externalType], scope)
+		m.internalAddrSchemas[internalType] = append(
+			m.internalAddrSchemas[internalType], scope)
+	}
+
+	return m
 }
 
 func newSecretKey(passphrase *[]byte, config *ScryptOptions) (*snacl.SecretKey, error) {
@@ -456,24 +521,4 @@ type EncryptorDecryptor interface {
 	Bytes() []byte
 	CopyBytes([]byte)
 	Zero()
-}
-
-type cryptoKey struct {
-	snacl.CryptoKey
-}
-
-func (ck *cryptoKey) Bytes() []byte {
-	return ck.CryptoKey[:]
-}
-
-func (ck *cryptoKey) CopyBytes(from []byte) {
-	copy(ck.CryptoKey[:], from)
-}
-
-func defaultNewCryptoKey() (EncryptorDecryptor, error) {
-	key, err := snacl.GenerateCryptoKey()
-	if err != nil {
-		return nil, err
-	}
-	return &cryptoKey{*key}, nil
 }

@@ -1,10 +1,15 @@
 package waddrmgr
 
 import (
+	"fmt"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/lightninglabs/neutrino/cache/lru"
 	"sync"
+)
+
+const (
+	defaultPrivKeyCacheSize = 10_000
 )
 
 type KeyScope struct {
@@ -117,6 +122,14 @@ type ScopedKeyManager struct {
 	mtx sync.RWMutex
 }
 
-func (s *ScopedKeyManager) Close() {
+func (s *ScopedKeyManager) AddrSchema() ScopeAddrSchema {
+	return s.addrSchema
+}
 
+func (s *ScopedKeyManager) Scope() KeyScope {
+	return s.scope
+}
+
+func (s *ScopedKeyManager) Close() {
+	fmt.Println("ScopedKeyManager::Close() was not implemented yet.")
 }

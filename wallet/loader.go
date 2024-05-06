@@ -99,6 +99,7 @@ func (l *Loader) CreateNewWallet(pubPassphrase, privPassphrase, seed []byte,
 			return nil, hdkeychain.ErrInvalidSeedLen
 		}
 
+		fmt.Println("【 Create Root Key 】")
 		rootKey, err = hdkeychain.NewMaster(seed, l.chainParams)
 		if err != nil {
 			return nil, fmt.Errorf("failed to derive master extended key")

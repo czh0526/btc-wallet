@@ -38,6 +38,7 @@ type ReadWriteTx interface {
 }
 
 type ReadBucket interface {
+	Name() []byte
 	NestedReadBucket(key []byte) ReadBucket
 	ForEach(func(k, v []byte) error) error
 	Get(key []byte) []byte

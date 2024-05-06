@@ -83,24 +83,28 @@ func createManagerNS(ns walletdb.ReadWriteBucket,
 		str := "failed to create main bucket"
 		return managerError(ErrDatabase, str, err)
 	}
+	fmt.Printf("\t=> %s => %s \n", ns.Name(), mainBucketName)
 
 	_, err = ns.CreateBucket(syncBucketName)
 	if err != nil {
 		str := "failed to create sync bucket"
 		return managerError(ErrDatabase, str, err)
 	}
+	fmt.Printf("\t=> %s => %s \n", ns.Name(), syncBucketName)
 
 	scopeBucket, err := ns.CreateBucket(scopeBucketName)
 	if err != nil {
 		str := "failed to create scope bucket"
 		return managerError(ErrDatabase, str, err)
 	}
+	fmt.Printf("\t=> %s => %s \n", ns.Name(), scopeBucketName)
 
 	scopeSchemas, err := ns.CreateBucket(scopeSchemaBucketName)
 	if err != nil {
 		str := "failed to create scope schemas"
 		return managerError(ErrDatabase, str, err)
 	}
+	fmt.Printf("\t=> %s => %s \n", ns.Name(), scopeSchemaBucketName)
 
 	for scope, scopeSchema := range defaultScopes {
 		scope, scopeSchema := scope, scopeSchema
@@ -111,11 +115,13 @@ func createManagerNS(ns walletdb.ReadWriteBucket,
 		if err != nil {
 			return err
 		}
+		fmt.Printf("\t=> %s => %s: %s -> %v bytes \n", ns.Name(), scopeSchemas.Name(), scopeKey, len(schemaBytes))
 
 		err = createScopedManagerNS(scopeBucket, &scope)
 		if err != nil {
 			return err
 		}
+		fmt.Printf("\t=> %s => %s => %v \n", ns.Name(), scopeBucket.Name(), scope)
 
 		err = putLastAccount(ns, &scope, DefaultAccountNum)
 		if err != nil {
@@ -579,6 +585,25 @@ func fetchCryptoKeys(ns walletdb.ReadBucket) ([]byte, []byte, []byte, error) {
 	return pubKey, privKey, scriptKey, nil
 }
 
+func fetchScopeAddrSchema(ns walletdb.ReadBucket,
+	scope *KeyScope) (*ScopeAddrSchema, error) {
+
+	schemaBucket := ns.NestedReadBucket(scopeBucketName)
+	if schemaBucket == nil {
+		str := "unable to find scope schema bucket"
+		return nil, managerError(ErrScopeNotFound, str, nil)
+	}
+
+	scopeKey := scopeToBytes(scope)
+	schemaBytes := schemaBucket.Get(scopeKey[:])
+	if schemaBytes == nil {
+		str := fmt.Sprintf("unable to find scope %v", scope)
+		return nil, managerError(ErrScopeNotFound, str, nil)
+	}
+
+	return scopeSchemaFromBytes(schemaBytes), nil
+}
+
 func fetchBirthday(ns walletdb.ReadBucket) (time.Time, error) {
 	var t time.Time
 
@@ -591,6 +616,23 @@ func fetchBirthday(ns walletdb.ReadBucket) (time.Time, error) {
 
 	t = time.Unix(int64(binary.BigEndian.Uint64(birthdayTimestamp)), 0)
 	return t, nil
+}
+
+func forEachKeyScope(ns walletdb.ReadBucket, fn func(KeyScope) error) error {
+	bucket := ns.NestedReadBucket(scopeBucketName)
+
+	return bucket.ForEach(func(k, v []byte) error {
+		if len(k) != 8 {
+			return nil
+		}
+
+		scope := KeyScope{
+			Purpose: binary.LittleEndian.Uint32(k),
+			Coin:    binary.LittleEndian.Uint32(k[4:]),
+		}
+
+		return fn(scope)
+	})
 }
 
 const scopeKeySize = 8
@@ -609,6 +651,13 @@ func scopeSchemaToBytes(schema *ScopeAddrSchema) []byte {
 	schemaBytes[1] = byte(schema.ExternalAddrType)
 
 	return schemaBytes[:]
+}
+
+func scopeSchemaFromBytes(schemaBytes []byte) *ScopeAddrSchema {
+	return &ScopeAddrSchema{
+		InternalAddrType: AddressType(schemaBytes[0]),
+		ExternalAddrType: AddressType(schemaBytes[1]),
+	}
 }
 
 func uint32ToBytes(number uint32) []byte {

@@ -125,12 +125,14 @@ func create(db walletdb.DB, pubPass, privPass []byte,
 	birthday time.Time, isWatchingOnly bool, cb func(walletdb.ReadWriteTx) error) error {
 
 	if !isWatchingOnly && rootKey == nil {
+		fmt.Println("【 Generate Seed 】")
 		hdSeed, err := hdkeychain.GenerateSeed(
 			hdkeychain.RecommendedSeedLen)
 		if err != nil {
 			return err
 		}
 
+		fmt.Println("【 New Master Key 】")
 		rootKey, err = hdkeychain.NewMaster(hdSeed, params)
 		if err != nil {
 			return fmt.Errorf("failed to derive master extended key")
@@ -141,15 +143,19 @@ func create(db walletdb.DB, pubPass, privPass []byte,
 		return fmt.Errorf("need extended private key for wallet that is not watching only")
 	}
 
+	fmt.Println("【 Create Wallet 】")
 	return walletdb.Update(db, func(tx walletdb.ReadWriteTx) error {
 		addrmgrNs, err := tx.CreateTopLevelBucket(waddrmgrNamespaceKey)
 		if err != nil {
 			return err
 		}
+		fmt.Printf("\t=> %s \n", waddrmgrNamespaceKey)
+
 		txmgrNs, err := tx.CreateTopLevelBucket(wtxmgrNamespaceKey)
 		if err != nil {
 			return err
 		}
+		fmt.Printf("\t=> %s \n", wtxmgrNamespaceKey)
 
 		err = waddrmgr.Create(
 			addrmgrNs, rootKey, pubPass, privPass, params, nil, birthday)

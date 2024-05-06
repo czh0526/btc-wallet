@@ -47,8 +47,8 @@ func createWallet(cfg *config) error {
 	privPass, _ := prompt.PrivatePass()
 	pubPass, _ := prompt.PublicPass()
 	seed, _ := prompt.Seed()
+	fmt.Println("【 Get Seed 】")
 
-	fmt.Println("Creating the wallet...")
 	w, err := loader.CreateNewWallet(pubPass, privPass, seed, time.Now())
 	if err != nil {
 		return err

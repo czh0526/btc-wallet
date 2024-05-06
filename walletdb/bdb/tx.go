@@ -23,7 +23,10 @@ func (tx *transaction) CreateTopLevelBucket(key []byte) (walletdb.ReadWriteBucke
 	if err != nil {
 		return nil, convertErr(err)
 	}
-	return (*bucket)(boltBucket), nil
+	return &bucket{
+		Bucket: boltBucket,
+		name:   key,
+	}, nil
 }
 
 func (tx *transaction) DeleteTopLevelBucket(key []byte) error {
@@ -49,7 +52,10 @@ func (tx *transaction) ReadWriteBucket(key []byte) walletdb.ReadWriteBucket {
 	if boltBucket == nil {
 		return nil
 	}
-	return (*bucket)(boltBucket)
+	return &bucket{
+		Bucket: boltBucket,
+		name:   key,
+	}
 }
 
 var _ walletdb.ReadWriteTx = (*transaction)(nil)

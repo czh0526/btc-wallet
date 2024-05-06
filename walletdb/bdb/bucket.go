@@ -5,20 +5,25 @@ import (
 	"go.etcd.io/bbolt"
 )
 
-type bucket bbolt.Bucket
+type bucket struct {
+	*bbolt.Bucket
+	name []byte
+}
+
+func (b *bucket) Name() []byte {
+	return b.name
+}
 
 func (b *bucket) NestedReadBucket(key []byte) walletdb.ReadBucket {
 	return b.NestedReadWriteBucket(key)
 }
 
-func (b *bucket) ForEach(f func(k []byte, v []byte) error) error {
-	//TODO implement me
-	panic("implement me")
+func (b *bucket) ForEach(fn func(k []byte, v []byte) error) error {
+	return convertErr(b.Bucket.ForEach(fn))
 }
 
 func (b *bucket) Get(key []byte) []byte {
-	//TODO implement me
-	panic("implement me")
+	return b.Bucket.Get(key)
 }
 
 func (b *bucket) ReadCursor() walletdb.ReadCursor {
@@ -27,19 +32,25 @@ func (b *bucket) ReadCursor() walletdb.ReadCursor {
 }
 
 func (b *bucket) NestedReadWriteBucket(key []byte) walletdb.ReadWriteBucket {
-	boltBucket := (*bbolt.Bucket)(b).Bucket(key)
+	boltBucket := b.Bucket.Bucket(key)
 	if boltBucket == nil {
 		return nil
 	}
-	return (*bucket)(boltBucket)
+	return &bucket{
+		Bucket: boltBucket,
+		name:   key,
+	}
 }
 
 func (b *bucket) CreateBucket(key []byte) (walletdb.ReadWriteBucket, error) {
-	boltBucket, err := (*bbolt.Bucket)(b).CreateBucket(key)
+	boltBucket, err := b.Bucket.CreateBucket(key)
 	if err != nil {
 		return nil, convertErr(err)
 	}
-	return (*bucket)(boltBucket), nil
+	return &bucket{
+		Bucket: boltBucket,
+		name:   key,
+	}, nil
 }
 
 func (b *bucket) CreateBucketIfNotExists(key []byte) (walletdb.ReadWriteBucket, error) {
@@ -53,7 +64,7 @@ func (b *bucket) DeleteNestedBucket(key []byte) error {
 }
 
 func (b *bucket) Put(key, value []byte) error {
-	return convertErr((*bbolt.Bucket)(b).Put(key, value))
+	return convertErr(b.Bucket.Put(key, value))
 }
 
 func (b *bucket) Delete(key []byte) error {
