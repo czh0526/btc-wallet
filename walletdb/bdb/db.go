@@ -11,8 +11,7 @@ import (
 type db bbolt.DB
 
 func (db *db) BeginReadTx() (walletdb.ReadTx, error) {
-	//TODO implement me
-	panic("implement me")
+	return db.beginTx(false)
 }
 
 func (db *db) beginTx(writable bool) (*transaction, error) {
@@ -42,8 +41,31 @@ func (db *db) PrintStats() string {
 }
 
 func (db *db) View(f func(tx walletdb.ReadTx) error, reset func()) error {
-	//TODO implement me
-	panic("implement me")
+
+	reset()
+
+	tx, err := db.BeginReadTx()
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	err = f(tx)
+	rollbackErr := tx.Rollback()
+	if err != nil {
+		return err
+	}
+
+	if rollbackErr != nil {
+		return rollbackErr
+	}
+
+	return nil
 }
 
 func (db *db) Update(f func(tx walletdb.ReadWriteTx) error, reset func()) error {

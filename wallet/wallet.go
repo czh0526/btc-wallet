@@ -149,13 +149,13 @@ func create(db walletdb.DB, pubPass, privPass []byte,
 		if err != nil {
 			return err
 		}
-		fmt.Printf("\t=> %s \n", waddrmgrNamespaceKey)
+		fmt.Printf("【 new ns 】=> %s \n", waddrmgrNamespaceKey)
 
 		txmgrNs, err := tx.CreateTopLevelBucket(wtxmgrNamespaceKey)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("\t=> %s \n", wtxmgrNamespaceKey)
+		fmt.Printf("【 new ns 】=> %s \n", wtxmgrNamespaceKey)
 
 		err = waddrmgr.Create(
 			addrmgrNs, rootKey, pubPass, privPass, params, nil, birthday)

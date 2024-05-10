@@ -1,6 +1,7 @@
 package waddrmgr
 
 import (
+	"fmt"
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"strconv"
 )
@@ -163,6 +164,13 @@ var errorCodeStrings = map[ErrorCode]string{
 	ErrEmptyPassphrase:   "ErrEmptyPassphrase",
 	ErrScopeNotFound:     "ErrScopeNotFound",
 	ErrAccountNotCached:  "ErrAccountNotCached",
+}
+
+func (e ErrorCode) String() string {
+	if s := errorCodeStrings[e]; s != "" {
+		return s
+	}
+	return fmt.Sprintf("Unknown ErrorCode (%d)", int(e))
 }
 
 type ManagerError struct {

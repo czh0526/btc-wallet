@@ -93,6 +93,10 @@ func Open(dbType string, args ...interface{}) (DB, error) {
 	return drv.Open(args...)
 }
 
+func View(db DB, f func(tx ReadTx) error) error {
+	return db.View(f, func() {})
+}
+
 func Update(db DB, f func(tx ReadWriteTx) error) error {
 	return db.Update(f, func() {})
 }
