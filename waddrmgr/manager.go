@@ -214,6 +214,7 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 			}
 		}
 
+		// 保存 root key
 		masterHDPrivKeyEnc, err := cryptoKeyPriv.Encrypt([]byte(rootKey.String()))
 		if err != nil {
 			return maybeConvertDbError(err)
@@ -230,11 +231,13 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 		privParams = masterKeyPriv.Marshal()
 	}
 
+	// 保存 secret key
 	err = putMasterKeyParams(ns, pubParams, privParams)
 	if err != nil {
 		return maybeConvertDbError(err)
 	}
 
+	// 保存 crypto key
 	err = putCryptoKeys(ns, cryptoKeyPubEnc, cryptoKeyPrivEnc, cryptoKeyScriptEnc)
 	if err != nil {
 		return maybeConvertDbError(err)
