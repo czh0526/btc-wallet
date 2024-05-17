@@ -92,6 +92,33 @@ var FastScryptOptions = ScryptOptions{
 	P: 1,
 }
 
+// Create 创建 Manager
+/*
+
+    masterKeyPub    |   "mpub" -> Marshal
+ ___________________|___________________________
+    masterKeyPriv   |   "mpriv" -> Marshal
+ ___________________|___________________________
+
+
+
+                    |    masterKeyPub   |    masterKeyPriv
+  __________________|___________________|________________________
+     cryptoKeyPub   |   "cpub" -> Enc   |
+  __________________|___________________|________________________
+     cryptoKeyPriv  |                   |  "cpriv" -> Enc
+  __________________|___________________|________________________
+    cryptoKeyScript |                   |  "cscript" -> Enc
+  __________________|___________________|________________________
+
+
+
+                    |    cryptoKeyPub    |     cryptoKeyPriv
+  __________________|____________________|________________________
+         rootKey    |   "mhdpub" -> Enc  |    "mhdpriv" -> Enc
+  __________________|____________________|________________________
+
+*/
 func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 	pubPassphrase, privPassphrase []byte,
 	chainParams *chaincfg.Params, config *ScryptOptions,
@@ -121,19 +148,21 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 		config = &DefaultScryptOptions
 	}
 
-	// 使用 pub password 构建一个 Secret Key
+	// Secret-Key for pub
 	masterKeyPub, err := newSecretKey(&pubPassphrase, config)
 	if err != nil {
 		str := "failed to master public key"
 		return managerError(ErrCrypto, str, err)
 	}
 
+	// Crypto-Key for pub
 	cryptoKeyPub, err := newCryptoKey()
 	if err != nil {
 		str := "failed to generate crypto public key"
 		return managerError(ErrCrypto, str, err)
 	}
 
+	// encoded Crypto-Key for pub
 	cryptoKeyPubEnc, err := masterKeyPub.Encrypt(cryptoKeyPub.Bytes())
 	if err != nil {
 		str := "failed to encrypt crypto public key"
@@ -155,7 +184,7 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 	var cryptoKeyPrivEnc []byte
 	var cryptoKeyScriptEnc []byte
 	if !isWatchingOnly {
-		// // 使用 private password 构建一个 Secret Key
+		// Secret-Key for priv
 		masterKeyPriv, err = newSecretKey(&privPassphrase, config)
 		if err != nil {
 			str := "failed to master private key"
@@ -170,7 +199,7 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 			return managerError(ErrCrypto, str, err)
 		}
 
-		// 生成 Crypto Key Private
+		// Crypto-Key for priv
 		cryptoKeyPriv, err := newCryptoKey()
 		if err != nil {
 			str := "failed to generate crypto private key"
@@ -178,7 +207,7 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 		}
 		defer cryptoKeyPriv.Zero()
 
-		// 生成 Crypto Key Script
+		// Crypto-Key for script
 		cryptoKeyScript, err := newCryptoKey()
 		if err != nil {
 			str := "failed to generate crypto script key"
@@ -231,7 +260,7 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 		privParams = masterKeyPriv.Marshal()
 	}
 
-	// 保存 secret key
+	// 保存 master key
 	err = putMasterKeyParams(ns, pubParams, privParams)
 	if err != nil {
 		return maybeConvertDbError(err)
@@ -297,6 +326,35 @@ func (m *Manager) IsLocked() bool {
 
 func (m *Manager) isLocked() bool {
 	return m.locked
+}
+
+func (m *Manager) lock() {
+	for _, manager := range m.scopedManagers {
+		for _, acctInfo := range manager.acctInfo {
+			if acctInfo.acctKeyPriv != nil {
+				acctInfo.acctKeyPriv.Zero()
+			}
+			acctInfo.acctKeyPriv = nil
+		}
+	}
+
+	for _, manager := range m.scopedManagers {
+		for _, ma := range manager.addrs {
+			switch addr := ma.(type) {
+			case *managedAddress:
+				addr.lock()
+			case *scriptAddress:
+				addr.lock()
+			}
+		}
+	}
+
+	m.cryptoKeyScript.Zero()
+	m.cryptoKeyPriv.Zero()
+	m.masterKeyPriv.Zero()
+	zero.Bytea64(&m.hashedPrivPassphrase)
+
+	m.locked = true
 }
 
 func (m *Manager) Unlock(ns walletdb.ReadBucket, passphrase []byte) error {
@@ -367,8 +425,37 @@ func (m *Manager) Unlock(ns walletdb.ReadBucket, passphrase []byte) error {
 				m.lock()
 				return err
 			}
+
+			privKey, _ := addressKey.ECPrivKey()
+			addressKey.Zero()
+
+			privKeyBytes := privKey.Serialize()
+			privKeyEncrypted, err := m.cryptoKeyPriv.Encrypt(privKeyBytes)
+			privKey.Zero()
+			if err != nil {
+				m.lock()
+				str := fmt.Sprintf("failed to encrypt private key for address %s",
+					info.managedAddr.Address())
+				return managerError(ErrCrypto, str, err)
+			}
+
+			switch a := info.managedAddr.(type) {
+			case *managedAddress:
+				a.privKeyEncrypted = privKeyEncrypted
+				a.privKeyCT = privKeyBytes
+			case *scriptAddress:
+			}
+
+			manager.deriveOnUnlock[0] = nil
+			manager.deriveOnUnlock = manager.deriveOnUnlock[1:]
 		}
 	}
+
+	m.locked = false
+	saltedPassphrase := append(m.privPassphraseSalt[:], passphrase...)
+	m.hashedPrivPassphrase = sha512.Sum512(saltedPassphrase)
+	zero.Bytes(saltedPassphrase)
+	return nil
 }
 
 func (m *Manager) NewScopedKeyManager(ns walletdb.ReadWriteBucket,
@@ -585,6 +672,14 @@ func newSecretKey(passphrase *[]byte, config *ScryptOptions) (*snacl.SecretKey, 
 	return secretKeyGen(passphrase, config)
 }
 
+// createManagerKeyScope 创建 KeyScore
+/*
+	root -> coinType -> account
+			  |			  |
+ 	 	    privKey 	privKey
+			  |			  |
+			pubKey		pubKey
+*/
 func createManagerKeyScope(ns walletdb.ReadWriteBucket,
 	scope KeyScope, root *hdkeychain.ExtendedKey,
 	cryptoKeyPub, cryptoKeyPriv EncryptorDecryptor) error {
