@@ -30,6 +30,7 @@ type loaderConfig struct {
 
 type Loader struct {
 	cfg            *loaderConfig
+	callbacks      []func(*Wallet)
 	chainParams    *chaincfg.Params
 	dbDirPath      string
 	noFreelistSync bool
@@ -219,7 +220,11 @@ func (l *Loader) OpenExistingWallet(pubPassphrase []byte,
 }
 
 func (l *Loader) onLoaded(w *Wallet) {
+	for _, fn := range l.callbacks {
+		fn(w)
+	}
 	l.wallet = w
+	l.callbacks = nil
 }
 
 func (l *Loader) UnloadWallet() error {
@@ -244,6 +249,18 @@ func (l *Loader) UnloadWallet() error {
 	l.wallet = nil
 	l.db = nil
 	return nil
+}
+
+func (l *Loader) RunAfterLoad(fn func(*Wallet)) {
+	l.mu.Lock()
+	if l.wallet != nil {
+		w := l.wallet
+		l.mu.Unlock()
+		fn(w)
+	} else {
+		l.callbacks = append(l.callbacks, fn)
+		l.mu.Unlock()
+	}
 }
 
 func fileExists(filePath string) (bool, error) {

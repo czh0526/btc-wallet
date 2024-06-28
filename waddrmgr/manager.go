@@ -140,34 +140,43 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 	if !isWatchingOnly {
 		defaultScope = ScopeAddrMap
 	}
+	fmt.Println("create manager ns =>")
 	if err := createManagerNS(ns, defaultScope); err != nil {
 		return maybeConvertDbError(err)
 	}
+	fmt.Println()
 
 	if config == nil {
 		config = &DefaultScryptOptions
 	}
 
 	// Secret-Key for pub
+	fmt.Println("new secret key from pubPassphrase")
 	masterKeyPub, err := newSecretKey(&pubPassphrase, config)
 	if err != nil {
 		str := "failed to master public key"
 		return managerError(ErrCrypto, str, err)
 	}
+	fmt.Println()
 
 	// Crypto-Key for pub
+	fmt.Println("new crypto key")
 	cryptoKeyPub, err := newCryptoKey()
 	if err != nil {
 		str := "failed to generate crypto public key"
 		return managerError(ErrCrypto, str, err)
 	}
+	fmt.Println()
 
 	// encoded Crypto-Key for pub
+	fmt.Println("encrypt `crypto key` => ")
 	cryptoKeyPubEnc, err := masterKeyPub.Encrypt(cryptoKeyPub.Bytes())
 	if err != nil {
 		str := "failed to encrypt crypto public key"
 		return managerError(ErrCrypto, str, err)
 	}
+	fmt.Printf("cryptoKeyPubEnc => %v \n", cryptoKeyPubEnc)
+	fmt.Println()
 
 	//createdAt := &BlockStamp{
 	//	Hash:      *chainParams.GenesisHash,
@@ -185,12 +194,14 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 	var cryptoKeyScriptEnc []byte
 	if !isWatchingOnly {
 		// Secret-Key for priv
+		fmt.Println("new secret key from privPassphrase")
 		masterKeyPriv, err = newSecretKey(&privPassphrase, config)
 		if err != nil {
 			str := "failed to master private key"
 			return managerError(ErrCrypto, str, err)
 		}
 		defer masterKeyPriv.Zero()
+		fmt.Println()
 
 		var privPassphraseSalt [saltSize]byte
 		_, err = rand.Read(privPassphraseSalt[:])
@@ -236,11 +247,13 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 		}
 
 		for _, defaultScope := range DefaultKeyScopes {
+			fmt.Printf("create manager key scope => `%v` \n", defaultScope)
 			err := createManagerKeyScope(
 				ns, defaultScope, rootKey, cryptoKeyPub, cryptoKeyPriv)
 			if err != nil {
 				return maybeConvertDbError(err)
 			}
+			fmt.Println()
 		}
 
 		// 保存 root key
@@ -378,6 +391,7 @@ func (m *Manager) Unlock(ns walletdb.ReadBucket, passphrase []byte) error {
 		return nil
 	}
 
+	// 解锁 masterKeyPriv
 	if err := m.masterKeyPriv.DeriveKey(&passphrase); err != nil {
 		m.lock()
 		if err == snacl.ErrInvalidPassword {
@@ -522,6 +536,19 @@ func managerExists(ns walletdb.ReadBucket) bool {
 	return mainBucket != nil
 }
 
+func (m *Manager) FetchScopedKeyManager(scope KeyScope) (*ScopedKeyManager, error) {
+	m.mtx.RLock()
+	defer m.mtx.RUnlock()
+
+	sm, ok := m.scopedManagers[scope]
+	if !ok {
+		str := fmt.Sprintf("scope `%v` not found", scope)
+		return nil, managerError(ErrScopeNotFound, str, nil)
+	}
+
+	return sm, nil
+}
+
 func loadManager(ns walletdb.ReadBucket, pubPassphrase []byte,
 	chainParams *chaincfg.Params) (*Manager, error) {
 
@@ -567,16 +594,20 @@ func loadManager(ns walletdb.ReadBucket, pubPassphrase []byte,
 			return nil, managerError(ErrCrypto, str, err)
 		}
 	}
+	fmt.Println("反序列化 Master Priv Key 参数")
 
 	var masterKeyPub snacl.SecretKey
 	if err := masterKeyPub.Unmarshal(masterKeyPubParams); err != nil {
 		str := "failed to unmarshal master public key"
 		return nil, managerError(ErrCrypto, str, err)
 	}
+	fmt.Println("反序列化 Master Pub Key 参数")
+
 	if err := masterKeyPub.DeriveKey(&pubPassphrase); err != nil {
 		str := "invalid passphrase for master public key"
 		return nil, managerError(ErrWrongPassphrase, str, err)
 	}
+	fmt.Println("根据 `pubPassphrase` 派生出 master pub key 的原始对象")
 
 	cryptoKeyPub := &cryptoKey{snacl.CryptoKey{}}
 	cryptoKeyPubCT, err := masterKeyPub.Decrypt(cryptoKeyPubEnc)
@@ -586,6 +617,7 @@ func loadManager(ns walletdb.ReadBucket, pubPassphrase []byte,
 	}
 	cryptoKeyPub.CopyBytes(cryptoKeyPubCT)
 	zero.Bytes(cryptoKeyPubCT)
+	fmt.Println("Decrypt Crypto Pub Key")
 
 	var privPassphraseSalt [saltSize]byte
 	_, err = rand.Read(privPassphraseSalt[:])
@@ -768,14 +800,14 @@ func deriveCoinTypeKey(masterNode *hdkeychain.ExtendedKey,
 
 	purpose, err := masterNode.DeriveNonStandard(
 		scope.Purpose + hdkeychain.HardenedKeyStart)
-	fmt.Printf("【 new key 】purpose key => %v \n", purpose)
+	fmt.Printf("【 derive purpose key 】=> %v \n", purpose)
 	if err != nil {
 		return nil, err
 	}
 
 	coinTypeKey, err := purpose.DeriveNonStandard(
 		scope.Coin + hdkeychain.HardenedKeyStart)
-	fmt.Printf("【 new key 】coin_type key => %v \n", coinTypeKey)
+	fmt.Printf("【 derive coin_type key 】=> %v \n", coinTypeKey)
 	if err != nil {
 		return nil, err
 	}
@@ -793,7 +825,7 @@ func deriveAccountKey(coinTypeKey *hdkeychain.ExtendedKey,
 
 	acctKey, err := coinTypeKey.DeriveNonStandard(
 		account + hdkeychain.HardenedKeyStart)
-	fmt.Printf("【 new key 】account key => %v \n", acctKey)
+	fmt.Printf("【 derive account key 】=> %v \n", acctKey)
 	return acctKey, err
 }
 

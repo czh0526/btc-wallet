@@ -41,7 +41,6 @@ func (db *db) PrintStats() string {
 }
 
 func (db *db) View(f func(tx walletdb.ReadTx) error, reset func()) error {
-
 	reset()
 
 	tx, err := db.BeginReadTx()

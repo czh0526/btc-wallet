@@ -1,6 +1,7 @@
 package waddrmgr
 
 import (
+	"errors"
 	"fmt"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
@@ -336,6 +337,7 @@ func (s *ScopedKeyManager) nextAddresses(ns walletdb.ReadWriteBucket,
 	}
 
 	addrType := s.accountAddrType(acctInfo, internal)
+	fmt.Println(addrType)
 
 	if numAddresses > MaxAddressesPerAccount || nextIndex+numAddresses > MaxAddressesPerAccount {
 		str := fmt.Sprintf("%d new addresses would exceed the maximum number of addresses per account %d",
@@ -350,6 +352,7 @@ func (s *ScopedKeyManager) nextAddresses(ns walletdb.ReadWriteBucket,
 	}
 	defer branchKey.Zero()
 
+	return nil, errors.New("nextAddresses() has not be implemented yet")
 }
 
 func (s *ScopedKeyManager) fetchUsed(ns walletdb.ReadBucket,
@@ -407,7 +410,7 @@ func (s *ScopedKeyManager) newAccount(ns walletdb.ReadWriteBucket,
 	}
 
 	_, err := s.lookupAccount(ns, name)
-	if err != nil {
+	if err == nil {
 		str := "account with the same name already exists"
 		return managerError(ErrAccountNotFound, str, err)
 	}

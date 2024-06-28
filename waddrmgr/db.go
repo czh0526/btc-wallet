@@ -117,20 +117,20 @@ func createManagerNS(ns walletdb.ReadWriteBucket,
 
 	for scope, scopeSchema := range defaultScopes {
 		scope, scopeSchema := scope, scopeSchema
-
+		fmt.Printf("\t new scope => %v \n", scope)
 		scopeKey := scopeToBytes(&scope)
 		schemaBytes := scopeSchemaToBytes(&scopeSchema)
 		err := scopeSchemas.Put(scopeKey[:], schemaBytes)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("【 write db 】%s => %s: %v -> %v bytes \n", ns.Name(), scopeSchemas.Name(), scopeKey, len(schemaBytes))
+		//fmt.Printf("【 write db 】%s => %s: %v -> %v bytes \n", ns.Name(), scopeSchemas.Name(), scopeKey, len(schemaBytes))
 
 		err = createScopedManagerNS(scopeBucket, &scope)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("【 new ns 】%s => %s => %v \n", ns.Name(), scopeBucket.Name(), scope)
+		//fmt.Printf("【 new ns 】%s => %s => %v \n", ns.Name(), scopeBucket.Name(), scope)
 
 		err = putLastAccount(ns, &scope, DefaultAccountNum)
 		if err != nil {
@@ -146,7 +146,7 @@ func createManagerNS(ns walletdb.ReadWriteBucket,
 	var dateBytes [8]byte
 	binary.LittleEndian.PutUint64(dateBytes[:], createDate)
 	err = mainBucket.Put(mgrCreateDateName, dateBytes[:])
-	fmt.Printf("【 write db 】%s => %s: %s -> %v bytes\n", ns.Name(), mainBucket.Name(), mgrCreateDateName, len(dateBytes))
+	fmt.Printf("【 put_create_date 】%s => %s: %s -> %v bytes\n", ns.Name(), mainBucket.Name(), mgrCreateDateName, len(dateBytes))
 	if err != nil {
 		str := "failed to store database creation time"
 		return managerError(ErrDatabase, str, err)
@@ -280,7 +280,7 @@ func putCoinTypeKeys(ns walletdb.ReadWriteBucket, scope *KeyScope,
 
 	if coinTypePubKeyEnc != nil {
 		err := scopedBucket.Put(coinTypePubKeyName, coinTypePubKeyEnc)
-		fmt.Printf("【 write db 】%s => %s => %v: %s -> %v bytes \n",
+		fmt.Printf("【 put_scope_bucket 】%s => %s => %v: %s -> %v bytes \n",
 			ns.Name(), scopeBucketName, scopedBucket.Name(), coinTypePubKeyName, len(coinTypePubKeyEnc))
 		if err != nil {
 			str := "failed to store encryptrd cointype public key"
@@ -290,7 +290,7 @@ func putCoinTypeKeys(ns walletdb.ReadWriteBucket, scope *KeyScope,
 
 	if coinTypePrivKeyEnc != nil {
 		err := scopedBucket.Put(coinTypePrivKeyName, coinTypePrivKeyEnc)
-		fmt.Printf("【 write db 】%s => %s => %v: %s -> %v bytes \n",
+		fmt.Printf("【 put_scope_bucket 】%s => %s => %v: %s -> %v bytes \n",
 			ns.Name(), scopeBucketName, scopedBucket.Name(), coinTypePrivKeyName, len(coinTypePrivKeyEnc))
 		if err != nil {
 			str := "failed to store encryptrd cointype private key"
@@ -306,7 +306,7 @@ func putManagerVersion(ns walletdb.ReadWriteBucket, version uint32) error {
 
 	verBytes := uint32ToBytes(version)
 	err := bucket.Put(mgrVersionName, verBytes)
-	fmt.Printf("【 write db 】%s => %s: %s -> %v bytes \n", ns.Name(), mainBucketName, mgrVersionName, len(verBytes))
+	fmt.Printf("【 put_version 】%s => %s: %s -> %v bytes \n", ns.Name(), mainBucketName, mgrVersionName, len(verBytes))
 	if err != nil {
 		str := "failed to store version"
 		return managerError(ErrDatabase, str, err)
@@ -420,7 +420,7 @@ func putMasterHDKeys(ns walletdb.ReadWriteBucket, masterHDPrivEnc, masterHDPubEn
 
 	if masterHDPrivEnc != nil {
 		err := bucket.Put(masterHDPrivName, masterHDPrivEnc)
-		fmt.Printf("【 write db 】%s => %s: %s => %v bytes \n",
+		fmt.Printf("【 put_master_hd_priv 】%s => %s: %s => %v bytes \n",
 			ns.Name(), mainBucketName, masterHDPrivName, len(masterHDPrivEnc))
 		if err != nil {
 			str := "failed to store encrypted master HD private key"
@@ -430,7 +430,7 @@ func putMasterHDKeys(ns walletdb.ReadWriteBucket, masterHDPrivEnc, masterHDPubEn
 
 	if masterHDPubEnc != nil {
 		err := bucket.Put(masterHDPubName, masterHDPubEnc)
-		fmt.Printf("【 write db 】%s => %s: %s => %v bytes \n",
+		fmt.Printf("【 put_master_hd_pub 】%s => %s: %s => %v bytes \n",
 			ns.Name(), mainBucketName, masterHDPubName, len(masterHDPubEnc))
 		if err != nil {
 			str := "failed to store encrypted master HD public key"
@@ -445,7 +445,7 @@ func fetchMasterKeyParams(ns walletdb.ReadBucket) ([]byte, []byte, error) {
 	bucket := ns.NestedReadBucket(mainBucketName)
 
 	val := bucket.Get(masterPubKeyName)
-	fmt.Printf("【 read db 】%s => %s: %s => %v bytes \n",
+	fmt.Printf("【 fetch_master_pub 】%s => %s: %s => %v bytes \n",
 		ns.Name(), mainBucketName, masterPubKeyName, len(val))
 	if val == nil {
 		str := "required master public key parameters not stored in database"
@@ -456,7 +456,7 @@ func fetchMasterKeyParams(ns walletdb.ReadBucket) ([]byte, []byte, error) {
 
 	var privParams []byte
 	val = bucket.Get(masterPrivKeyName)
-	fmt.Printf("【 read db 】%s => %s: %s => %v bytes \n",
+	fmt.Printf("【 fetch_master_priv 】%s => %s: %s => %v bytes \n",
 		ns.Name(), mainBucketName, masterPrivKeyName, len(val))
 	if val != nil {
 		privParams = make([]byte, len(val))
@@ -471,7 +471,7 @@ func putMasterKeyParams(ns walletdb.ReadWriteBucket, pubParams, privParams []byt
 
 	if privParams != nil {
 		err := bucket.Put(masterPrivKeyName, privParams)
-		fmt.Printf("【 write db 】%s => %s: %s => %v bytes \n",
+		fmt.Printf("【 put_master_priv 】%s => %s: %s => %v bytes \n",
 			ns.Name(), mainBucketName, masterPrivKeyName, len(privParams))
 		if err != nil {
 			str := "failed to store master private key parameters"
@@ -481,7 +481,7 @@ func putMasterKeyParams(ns walletdb.ReadWriteBucket, pubParams, privParams []byt
 
 	if pubParams != nil {
 		err := bucket.Put(masterPubKeyName, pubParams)
-		fmt.Printf("【 write db 】%s => %s: %s => %v bytes \n",
+		fmt.Printf("【 put_master_pub 】%s => %s: %s => %v bytes \n",
 			ns.Name(), mainBucketName, masterPubKeyName, len(pubParams))
 		if err != nil {
 			str := "failed to store master public key parameters"
@@ -496,7 +496,7 @@ func fetchCryptoKeys(ns walletdb.ReadBucket) ([]byte, []byte, []byte, error) {
 	bucket := ns.NestedReadBucket(mainBucketName)
 
 	val := bucket.Get(cryptoPubKeyName)
-	fmt.Printf("【 read db 】%s => %s: %s => %v bytes \n",
+	fmt.Printf("【 fetch_crypto_pub 】%s => %s: %s => %v bytes \n",
 		ns.Name(), mainBucketName, cryptoPubKeyName, len(val))
 	if val == nil {
 		str := "required encrypted crypto public key parameters not stored in database"
@@ -507,7 +507,7 @@ func fetchCryptoKeys(ns walletdb.ReadBucket) ([]byte, []byte, []byte, error) {
 
 	var privKey []byte
 	val = bucket.Get(cryptoPrivKeyName)
-	fmt.Printf("【 read db 】%s => %s: %s => %v bytes \n",
+	fmt.Printf("【 fetch_crypto_priv 】%s => %s: %s => %v bytes \n",
 		ns.Name(), mainBucketName, cryptoPrivKeyName, len(val))
 	if val != nil {
 		privKey = make([]byte, len(val))
@@ -516,7 +516,7 @@ func fetchCryptoKeys(ns walletdb.ReadBucket) ([]byte, []byte, []byte, error) {
 
 	var scriptKey []byte
 	val = bucket.Get(cryptoScriptKeyName)
-	fmt.Printf("【 read db 】%s => %s: %s => %v bytes \n",
+	fmt.Printf("【 fetch_crypto_script 】%s => %s: %s => %v bytes \n",
 		ns.Name(), mainBucketName, cryptoScriptKeyName, len(val))
 	if val != nil {
 		scriptKey = make([]byte, len(val))
@@ -533,7 +533,7 @@ func putCryptoKeys(ns walletdb.ReadWriteBucket,
 
 	if pubKeyEncrypted != nil {
 		err := bucket.Put(cryptoPubKeyName, pubKeyEncrypted)
-		fmt.Printf("【 write db 】%s => %s: %s => %v bytes \n",
+		fmt.Printf("【 put_crypto_pub 】%s => %s: %s => %v bytes \n",
 			ns.Name(), mainBucketName, cryptoPubKeyName, len(pubKeyEncrypted))
 		if err != nil {
 			str := "failed to store encrypted crypto public key"
@@ -543,7 +543,7 @@ func putCryptoKeys(ns walletdb.ReadWriteBucket,
 
 	if privKeyEncrypted != nil {
 		err := bucket.Put(cryptoPrivKeyName, privKeyEncrypted)
-		fmt.Printf("【 write db 】%s => %s: %s => %v bytes \n",
+		fmt.Printf("【 pub_crypto_priv 】%s => %s: %s => %v bytes \n",
 			ns.Name(), mainBucketName, cryptoPrivKeyName, len(privKeyEncrypted))
 		if err != nil {
 			str := "failed to store encrypted crypto private key"
@@ -553,7 +553,7 @@ func putCryptoKeys(ns walletdb.ReadWriteBucket,
 
 	if scriptKeyEncrypted != nil {
 		err := bucket.Put(cryptoScriptKeyName, scriptKeyEncrypted)
-		fmt.Printf("【 write db 】%s => %s: %s => %v bytes \n",
+		fmt.Printf("【 pub_crypto_script 】%s => %s: %s => %v bytes \n",
 			ns.Name(), mainBucketName, cryptoScriptKeyName, len(scriptKeyEncrypted))
 		if err != nil {
 			str := "failed to store encrypted crypto script key"

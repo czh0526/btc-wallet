@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+option go_package = "./walletrpc";
+
+package walletrpc;
+
+message WalletExistsRequest{}
+message WalletExistsResponse {
+  bool exists = 1;
+}
+
+message CreateWalletRequest{
+  bytes public_passphrase = 1;
+  bytes private_passphrase = 2;
+  bytes seed = 3;
+}
+message CreateWalletResponse {}
+
+message OpenWalletRequest {
+  bytes public_passphrase = 1;
+}
+message OpenWalletResponse {}
+
+service WalletLoaderService {
+  rpc WalletExists(WalletExistsRequest) returns (WalletExistsResponse);
+  rpc CreateWallet(CreateWalletRequest) returns (CreateWalletResponse);
+  rpc OpenWallet(OpenWalletRequest) returns (OpenWalletResponse);
+}
+
+
+
+message ImportPrivateKeyRequest {
+  bytes passphrase = 1;
+  uint32 account = 2;
+  string private_key_wif = 3;
+  bool rescan = 4;
+}
+message ImportPrivateKeyResponse {}
+
+message SignTransactionRequest {
+  bytes passphrase = 1;
+  bytes serialized_transaction = 2;
+  repeated uint32 input_indexes = 3;
+}
+message SignTransactionResponse {
+  bytes transaction = 1;
+  repeated uint32 unsigned_input_indexes = 2;
+}
+
+service WalletService {
+  rpc ImportPrivateKey(ImportPrivateKeyRequest) returns (ImportPrivateKeyResponse);
+  rpc SignTransaction(SignTransactionRequest) returns (SignTransactionResponse);
+}

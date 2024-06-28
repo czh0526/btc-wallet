@@ -87,7 +87,7 @@ func putAccountRow(ns walletdb.ReadWriteBucket, scope *KeyScope,
 
 	bucket := scopedBucket.NestedReadWriteBucket(acctBucketName)
 	err = bucket.Put(uint32ToBytes(account), serializeAccountRow(row))
-	fmt.Printf("【 write db 】%s => %s => %v => %s: %v -> {%v} \n",
+	fmt.Printf("【 put_account_row 】%s => %s => %v => %s: %v -> {%v} \n",
 		ns.Name(), scopeBucketName, scope, acctBucketName, account, "AccountRow")
 	if err != nil {
 		str := fmt.Sprintf("failed to store account %d", account)
@@ -107,7 +107,7 @@ func putAccountIDIndex(ns walletdb.ReadWriteBucket, scope *KeyScope,
 
 	bucket := scopedBucket.NestedReadWriteBucket(acctIDIdxBucketName)
 	err = bucket.Put(uint32ToBytes(account), stringToBytes(name))
-	fmt.Printf("【 write db 】%s => %s => %v => %s: %v -> {%v} \n",
+	fmt.Printf("【 put_account_id_index 】%s => %s => %v => %s: %v -> {%v} \n",
 		ns.Name(), scopeBucketName, scope, acctIDIdxBucketName, account, name)
 	if err != nil {
 		str := fmt.Sprintf("failed to store account id index key %s", name)
@@ -127,7 +127,7 @@ func putAccountNameIndex(ns walletdb.ReadWriteBucket, scope *KeyScope,
 
 	bucket := scopedBucket.NestedReadWriteBucket(acctNameIdxBucketName)
 	err = bucket.Put(stringToBytes(name), uint32ToBytes(account))
-	fmt.Printf("【 write db 】%s => %s => %v => %s: %v -> {%v} \n",
+	fmt.Printf("【 put_account_name_index 】%s => %s => %v => %s: %v -> {%v} \n",
 		ns.Name(), scopeBucketName, scope, acctNameIdxBucketName, name, account)
 	if err != nil {
 		str := fmt.Sprintf("failed to store account name index key %s", name)

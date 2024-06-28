@@ -26,6 +26,9 @@ type Wallet struct {
 	Manager *waddrmgr.Manager
 	TxStore *wtxmgr.Store
 
+	unlockRequests chan unlockRequest
+	lockRequests   chan struct{}
+
 	started bool
 	quit    chan struct{}
 	quitMu  sync.Mutex
@@ -66,11 +69,30 @@ func (w *Wallet) Stop() {
 	}
 }
 
+type (
+	unlockRequest struct {
+		passphrase []byte
+		lockAfter  <-chan time.Time
+		err        chan error
+	}
+)
+
+func (w *Wallet) Unlock(passphrase []byte, lock <-chan time.Time) error {
+	err := make(chan error, 1)
+	w.unlockRequests <- unlockRequest{
+		passphrase: passphrase,
+		lockAfter:  lock,
+		err:        err,
+	}
+	return <-err
+}
+
 func (w *Wallet) WaitForShutdown() {
 	w.wg.Wait()
 }
 
 func (w *Wallet) txCreator() {
+	fmt.Printf("Wallet::txCreator() was running ... \n")
 	quit := w.quitChan()
 out:
 	for {
@@ -84,11 +106,30 @@ out:
 }
 
 func (w *Wallet) walletLocker() {
+	fmt.Printf("Wallet::txCreator() was running ... \n")
 	var timeout <-chan time.Time
 	quit := w.quitChan()
 out:
 	for {
 		select {
+		case req := <-w.unlockRequests:
+			err := walletdb.View(w.db, func(tx walletdb.ReadTx) error {
+				addrmgrNs := tx.ReadBucket(waddrmgrNamespaceKey)
+				return w.Manager.Unlock(addrmgrNs, req.passphrase)
+			})
+			if err != nil {
+				req.err <- err
+				continue
+			}
+			timeout = req.lockAfter
+			if timeout == nil {
+				fmt.Println("The wallet has been unlocked without a time limit")
+			} else {
+				fmt.Println("The wallet has been temporarily unlocked")
+			}
+			req.err <- nil
+			continue
+
 		case <-quit:
 			break out
 		case <-timeout:

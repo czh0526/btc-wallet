@@ -1,6 +1,7 @@
 package waddrmgr
 
 import (
+	"fmt"
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
 	"github.com/czh0526/btc-wallet/walletdb"
@@ -51,6 +52,18 @@ func TestManager(t *testing.T) {
 	}
 }
 
+type testContext struct {
+	t               *testing.T
+	caseName        string
+	db              walletdb.DB
+	rootManager     *Manager
+	manager         *ScopedKeyManager
+	internalAccount uint32
+	create          bool
+	unlocked        bool
+	watchingOnly    bool
+}
+
 func testManagerCase(t *testing.T, caseName string,
 	caseCreatedWatchingOnly bool, casePrivPassphrase []byte,
 	caseKey *hdkeychain.ExtendedKey) {
@@ -76,6 +89,7 @@ func testManagerCase(t *testing.T, caseName string,
 			return err
 		}
 
+		fmt.Println("\n Create Manager => ")
 		err = Create(
 			ns, caseKey, pubPassphrase, casePrivPassphrase,
 			&chaincfg.MainNetParams, &FastScryptOptions, time.Time{})
@@ -83,6 +97,7 @@ func testManagerCase(t *testing.T, caseName string,
 			return err
 		}
 
+		fmt.Println("\n Open Manager => ")
 		mgr, err = Open(ns, pubPassphrase, &chaincfg.MainNetParams)
 		if err != nil {
 			return nil
@@ -95,9 +110,36 @@ func testManagerCase(t *testing.T, caseName string,
 		return err
 	})
 	if err != nil {
-		t.Errorf("(%s) Failed to Create/Open wallet: %v", caseName, err)
+		t.Errorf("(%s) Create/Open: unexpected error: %v", caseName, err)
 		return
 	}
+
+	err = walletdb.Update(db, func(tx walletdb.ReadWriteTx) error {
+		ns := tx.ReadWriteBucket(waddrmgrNamespaceKey)
+		return Create(
+			ns, caseKey, pubPassphrase, casePrivPassphrase,
+			&chaincfg.MainNetParams, &FastScryptOptions, time.Time{})
+	})
+	if !checkManagerError(t, fmt.Sprintf("(%s) Create existing", caseName), err, ErrAlreadyExists) {
+		mgr.Close()
+		return
+	}
+
+	scopedMgr, err := mgr.FetchScopedKeyManager(KeyScopeBIP0044)
+	if err != nil {
+		t.Fatalf("(%s) unable to fetch default scope: %v", caseName, err)
+	}
+
+	testManagerAPI(&testContext{
+		t:               t,
+		caseName:        caseName,
+		db:              db,
+		manager:         scopedMgr,
+		rootManager:     mgr,
+		internalAccount: 0,
+		create:          false,
+		watchingOnly:    caseCreatedWatchingOnly,
+	}, caseCreatedWatchingOnly)
 }
 
 func emptyDB(t *testing.T) (tearDownFunc func(), db walletdb.DB) {
@@ -118,4 +160,74 @@ func emptyDB(t *testing.T) (tearDownFunc func(), db walletdb.DB) {
 	}
 
 	return
+}
+
+func testManagerAPI(tc *testContext, caseCreateWatchingOnly bool) {
+	tc.internalAccount = 0
+	testNewAccount(tc)
+}
+
+func testNewAccount(tc *testContext) bool {
+	// 1
+	if tc.watchingOnly {
+		err := walletdb.Update(tc.db, func(tx walletdb.ReadWriteTx) error {
+			ns := tx.ReadWriteBucket(waddrmgrNamespaceKey)
+			_, err := tc.manager.NewAccount(ns, "test")
+			return err
+		})
+		if !checkManagerError(tc.t, "Create account in watching-only mode", err, ErrWatchingOnly) {
+			tc.manager.Close()
+			return false
+		}
+		return true
+	}
+
+	// 2
+	err := walletdb.Update(tc.db, func(tx walletdb.ReadWriteTx) error {
+		ns := tx.ReadWriteBucket(waddrmgrNamespaceKey)
+		_, err := tc.manager.NewAccount(ns, "test")
+		return err
+	})
+	if !checkManagerError(tc.t,
+		"Create account when wallet is locked", err, ErrLocked) {
+		tc.manager.Close()
+		return false
+	}
+
+	// 3
+	err = walletdb.Update(tc.db, func(tx walletdb.ReadWriteTx) error {
+		ns := tx.ReadWriteBucket(waddrmgrNamespaceKey)
+		err = tc.rootManager.Unlock(ns, privPassphrase)
+		return err
+	})
+	if err != nil {
+		tc.t.Errorf("Unlock: unexpected error: %v", err)
+		return false
+	}
+	tc.unlocked = true
+
+	// 4
+	testName := "acct-create"
+	expectedAccount := tc.internalAccount + 1
+	if !tc.create {
+		testName = "acct-open"
+		expectedAccount++
+	}
+	var account uint32
+	err = walletdb.Update(tc.db, func(tx walletdb.ReadWriteTx) error {
+		ns := tx.ReadWriteBucket(waddrmgrNamespaceKey)
+		var err error
+		account, err = tc.manager.NewAccount(ns, testName)
+		return err
+	})
+	if err != nil {
+		tc.t.Errorf("NewAccount: unexpected error: %v", err)
+		return false
+	}
+	if account != expectedAccount {
+		tc.t.Errorf("NewAccount: account mismatch -- got %d, want %d", account, expectedAccount)
+		return false
+	}
+
+	return true
 }
