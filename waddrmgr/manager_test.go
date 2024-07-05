@@ -1,6 +1,7 @@
 package waddrmgr
 
 import (
+	"bytes"
 	"fmt"
 	"github.com/btcsuite/btcd/btcutil/hdkeychain"
 	"github.com/btcsuite/btcd/chaincfg"
@@ -29,6 +30,97 @@ var (
 
 	waddrmgrNamespaceKey = []byte("waddrmgrNamespace")
 )
+
+func TestNewRawAccount(t *testing.T) {
+	t.Parallel()
+
+	teardown, db := emptyDB(t)
+	defer teardown()
+
+	var mgr *Manager
+	err := walletdb.Update(db, func(tx walletdb.ReadWriteTx) error {
+		ns, err := tx.CreateTopLevelBucket(waddrmgrNamespaceKey)
+		if err != nil {
+			return err
+		}
+
+		err = Create(ns, rootKey, pubPassphrase, privPassphrase,
+			&chaincfg.MainNetParams, &FastScryptOptions, time.Time{})
+		if err != nil {
+			return err
+		}
+
+		mgr, err = Open(ns, pubPassphrase, &chaincfg.MainNetParams)
+		if err != nil {
+			return err
+		}
+
+		return mgr.Unlock(ns, privPassphrase)
+	})
+	if err != nil {
+		t.Fatalf("create/open: unexpected error: %v", err)
+	}
+	defer mgr.Close()
+
+	scopedMgr, err := mgr.FetchScopedKeyManager(KeyScopeBIP0084)
+	if err != nil {
+		t.Fatalf("fetch scope %v: %v", KeyScopeBIP0084, err)
+	}
+
+	const accountNum = 1000
+	err = walletdb.Update(db, func(tx walletdb.ReadWriteTx) error {
+		ns := tx.ReadWriteBucket(waddrmgrNamespaceKey)
+		return scopedMgr.NewRawAccount(ns, accountNum)
+	})
+	if err != nil {
+		t.Fatalf("unable to create new account: %v", err)
+	}
+
+	testNewRawAccount(t, mgr, db, accountNum, scopedMgr)
+}
+
+func testNewRawAccount(t *testing.T, _ *Manager, db walletdb.DB, accountNum uint32, scopedMgr *ScopedKeyManager) {
+	var accountAddrNext ManagedAddress
+	err := walletdb.Update(db, func(tx walletdb.ReadWriteTx) error {
+		ns := tx.ReadWriteBucket(waddrmgrNamespaceKey)
+
+		addrs, err := scopedMgr.NextExternalAddresses(
+			ns, accountNum, 1)
+		if err != nil {
+			return err
+		}
+
+		accountAddrNext = addrs[0]
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("unable to create addr: %v", err)
+	}
+
+	var accountTargetAddr ManagedAddress
+	err = walletdb.Update(db, func(tx walletdb.ReadWriteTx) error {
+		ns := tx.ReadWriteBucket(waddrmgrNamespaceKey)
+
+		keyPath := DerivationPath{
+			InternalAccount: accountNum,
+			Account:         hdkeychain.HardenedKeyStart,
+			Branch:          0,
+			Index:           0,
+		}
+		accountTargetAddr, err = scopedMgr.DeriveFromKeyPath(ns, keyPath)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("unable to derive addr: %v", err)
+	}
+
+	if accountAddrNext.AddrType() != accountTargetAddr.AddrType() {
+		t.Fatalf("wrong addr type: %v vs %v", accountAddrNext.AddrType(), accountTargetAddr.AddrType())
+	}
+	if !bytes.Equal(accountAddrNext.AddrHash(), accountTargetAddr.AddrHash()) {
+		t.Fatalf("wrong pubkey hash: %x vs %x", accountAddrNext.AddrHash(), accountTargetAddr.AddrHash())
+	}
+}
 
 func TestManager(t *testing.T) {
 	tests := []struct {
@@ -89,7 +181,7 @@ func testManagerCase(t *testing.T, caseName string,
 			return err
 		}
 
-		fmt.Println("\n Create Manager => ")
+		fmt.Println("\nCreate Manager => ")
 		err = Create(
 			ns, caseKey, pubPassphrase, casePrivPassphrase,
 			&chaincfg.MainNetParams, &FastScryptOptions, time.Time{})
@@ -97,7 +189,7 @@ func testManagerCase(t *testing.T, caseName string,
 			return err
 		}
 
-		fmt.Println("\n Open Manager => ")
+		fmt.Println("\nOpen Manager => ")
 		mgr, err = Open(ns, pubPassphrase, &chaincfg.MainNetParams)
 		if err != nil {
 			return nil
@@ -137,7 +229,7 @@ func testManagerCase(t *testing.T, caseName string,
 		manager:         scopedMgr,
 		rootManager:     mgr,
 		internalAccount: 0,
-		create:          false,
+		create:          true,
 		watchingOnly:    caseCreatedWatchingOnly,
 	}, caseCreatedWatchingOnly)
 }
@@ -163,8 +255,51 @@ func emptyDB(t *testing.T) (tearDownFunc func(), db walletdb.DB) {
 }
 
 func testManagerAPI(tc *testContext, caseCreateWatchingOnly bool) {
-	tc.internalAccount = 0
-	testNewAccount(tc)
+	if !caseCreateWatchingOnly {
+		testLocking(tc)
+
+		tc.internalAccount = 0
+		testNewAccount(tc)
+	}
+}
+
+func testLocking(tc *testContext) bool {
+	if tc.unlocked {
+		tc.t.Error("testLocking called with an unlocked manager")
+		return false
+	}
+	if !tc.rootManager.IsLocked() {
+		tc.t.Error("IsLocked: returned false on locked manager")
+		return false
+	}
+
+	err := tc.rootManager.Lock()
+	wantErrCode := ErrLocked
+	if tc.watchingOnly {
+		wantErrCode = ErrWatchingOnly
+	}
+	if !checkManagerError(tc.t, "Lock", err, wantErrCode) {
+		return false
+	}
+
+	err = walletdb.View(tc.db, func(tx walletdb.ReadTx) error {
+		ns := tx.ReadBucket(waddrmgrNamespaceKey)
+		return tc.rootManager.Unlock(ns, privPassphrase)
+	})
+	if tc.watchingOnly {
+		if !checkManagerError(tc.t, "Unlock", err, ErrWatchingOnly) {
+			return false
+		}
+	} else if err != nil {
+		tc.t.Error("Unlock: unexpected error:", err)
+		return false
+	}
+	if !tc.watchingOnly && tc.rootManager.IsLocked() {
+		tc.t.Error("IsLocked: returned false on unlocked manager")
+		return false
+	}
+
+	return true
 }
 
 func testNewAccount(tc *testContext) bool {
@@ -226,6 +361,17 @@ func testNewAccount(tc *testContext) bool {
 	}
 	if account != expectedAccount {
 		tc.t.Errorf("NewAccount: account mismatch -- got %d, want %d", account, expectedAccount)
+		return false
+	}
+
+	// 5 Test duplicate account name error
+	err = walletdb.Update(tc.db, func(tx walletdb.ReadWriteTx) error {
+		ns := tx.ReadWriteBucket(waddrmgrNamespaceKey)
+		_, err := tc.manager.NewAccount(ns, testName)
+		return err
+	})
+	wantErrCode := ErrDuplicateAccount
+	if !checkManagerError(tc.t, testName, err, wantErrCode) {
 		return false
 	}
 

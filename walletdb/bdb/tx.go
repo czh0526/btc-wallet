@@ -9,13 +9,12 @@ type transaction struct {
 	boltTx *bbolt.Tx
 }
 
-func (tx *transaction) ForEachBucket(f func(key []byte) error) error {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (tx *transaction) Rollback() error {
-	return convertErr(tx.boltTx.Rollback())
+func (tx *transaction) ForEachBucket(fn func(key []byte) error) error {
+	return convertErr(tx.boltTx.ForEach(
+		func(name []byte, _ *bbolt.Bucket) error {
+			return fn(name)
+		}),
+	)
 }
 
 func (tx *transaction) CreateTopLevelBucket(key []byte) (walletdb.ReadWriteBucket, error) {
@@ -30,17 +29,11 @@ func (tx *transaction) CreateTopLevelBucket(key []byte) (walletdb.ReadWriteBucke
 }
 
 func (tx *transaction) DeleteTopLevelBucket(key []byte) error {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (tx *transaction) Commit() error {
-	return convertErr(tx.boltTx.Commit())
-}
-
-func (tx *transaction) OnCommit(f func()) {
-	//TODO implement me
-	panic("implement me")
+	err := tx.boltTx.DeleteBucket(key)
+	if err != nil {
+		return convertErr(err)
+	}
+	return nil
 }
 
 func (tx *transaction) ReadBucket(key []byte) walletdb.ReadBucket {
@@ -56,6 +49,18 @@ func (tx *transaction) ReadWriteBucket(key []byte) walletdb.ReadWriteBucket {
 		Bucket: boltBucket,
 		name:   key,
 	}
+}
+
+func (tx *transaction) Commit() error {
+	return convertErr(tx.boltTx.Commit())
+}
+
+func (tx *transaction) Rollback() error {
+	return convertErr(tx.boltTx.Rollback())
+}
+
+func (tx *transaction) OnCommit(f func()) {
+	tx.boltTx.OnCommit(f)
 }
 
 var _ walletdb.ReadWriteTx = (*transaction)(nil)

@@ -92,6 +92,19 @@ var FastScryptOptions = ScryptOptions{
 	P: 1,
 }
 
+type AccountProperties struct {
+	AccountNumber        uint32
+	AccountName          string
+	ExternalKeyCount     uint32
+	InternalKeyCount     uint32
+	ImportedKeyCount     uint32
+	AccountPubKey        *hdkeychain.ExtendedKey
+	MasterKeyFingerprint uint32
+	KeyScope             KeyScope
+	IsWatchOnly          bool
+	AddrSchema           *ScopeAddrSchema
+}
+
 // Create 创建 Manager
 /*
 
@@ -151,31 +164,28 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 	}
 
 	// Secret-Key for pub
-	fmt.Println("new secret key from pubPassphrase")
+	fmt.Println("根据`pubPassphrase`创建一个 SecretKey ")
 	masterKeyPub, err := newSecretKey(&pubPassphrase, config)
 	if err != nil {
 		str := "failed to master public key"
 		return managerError(ErrCrypto, str, err)
 	}
-	fmt.Println()
 
 	// Crypto-Key for pub
-	fmt.Println("new crypto key")
+	fmt.Println("创建一个 CryptoKey，用于公钥加密")
 	cryptoKeyPub, err := newCryptoKey()
 	if err != nil {
 		str := "failed to generate crypto public key"
 		return managerError(ErrCrypto, str, err)
 	}
-	fmt.Println()
 
 	// encoded Crypto-Key for pub
-	fmt.Println("encrypt `crypto key` => ")
+	fmt.Println("使用`SecretKey`加密CryptoKeyPub")
 	cryptoKeyPubEnc, err := masterKeyPub.Encrypt(cryptoKeyPub.Bytes())
 	if err != nil {
 		str := "failed to encrypt crypto public key"
 		return managerError(ErrCrypto, str, err)
 	}
-	fmt.Printf("cryptoKeyPubEnc => %v \n", cryptoKeyPubEnc)
 	fmt.Println()
 
 	//createdAt := &BlockStamp{
@@ -194,14 +204,13 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 	var cryptoKeyScriptEnc []byte
 	if !isWatchingOnly {
 		// Secret-Key for priv
-		fmt.Println("new secret key from privPassphrase")
+		fmt.Println("根据`privPassphrase`创建一个 SecretKey")
 		masterKeyPriv, err = newSecretKey(&privPassphrase, config)
 		if err != nil {
 			str := "failed to master private key"
 			return managerError(ErrCrypto, str, err)
 		}
 		defer masterKeyPriv.Zero()
-		fmt.Println()
 
 		var privPassphraseSalt [saltSize]byte
 		_, err = rand.Read(privPassphraseSalt[:])
@@ -211,6 +220,7 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 		}
 
 		// Crypto-Key for priv
+		fmt.Println("创建一个 CryptoKey,用于私钥加密")
 		cryptoKeyPriv, err := newCryptoKey()
 		if err != nil {
 			str := "failed to generate crypto private key"
@@ -219,6 +229,7 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 		defer cryptoKeyPriv.Zero()
 
 		// Crypto-Key for script
+		fmt.Println("创建一个 CryptoKey,用于Script加密")
 		cryptoKeyScript, err := newCryptoKey()
 		if err != nil {
 			str := "failed to generate crypto script key"
@@ -227,6 +238,7 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 		defer cryptoKeyScript.Zero()
 
 		// 用 private Secret Key 加密 private Crypto Key
+		fmt.Println("使用`SecretKey`加密CryptoKeyPriv")
 		cryptoKeyPrivEnc, err = masterKeyPriv.Encrypt(cryptoKeyPriv.Bytes())
 		if err != nil {
 			str := "failed to encrypt crypto private key"
@@ -234,11 +246,13 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 		}
 
 		// 用 private Secret Key 加密 script Crypto Key
+		fmt.Println("使用`SecretKey`加密CryptoKeyScript")
 		cryptoKeyScriptEnc, err = masterKeyPriv.Encrypt(cryptoKeyScript.Bytes())
 		if err != nil {
 			str := "failed to encrypt crypto script key"
 			return managerError(ErrCrypto, str, err)
 		}
+		fmt.Println()
 
 		rootPubKey, err := rootKey.Neuter()
 		if err != nil {
@@ -247,7 +261,7 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 		}
 
 		for _, defaultScope := range DefaultKeyScopes {
-			fmt.Printf("create manager key scope => `%v` \n", defaultScope)
+			fmt.Printf("createManagerKeyScope(...) => `%v` \n", defaultScope)
 			err := createManagerKeyScope(
 				ns, defaultScope, rootKey, cryptoKeyPub, cryptoKeyPriv)
 			if err != nil {
@@ -265,6 +279,7 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 		if err != nil {
 			return maybeConvertDbError(err)
 		}
+		fmt.Println("putMasterHDKeys(...) => 保存`rootKey`")
 		err = putMasterHDKeys(ns, masterHDPrivKeyEnc, masterHDPubKeyEnc)
 		if err != nil {
 			return maybeConvertDbError(err)
@@ -274,12 +289,14 @@ func Create(ns walletdb.ReadWriteBucket, rootKey *hdkeychain.ExtendedKey,
 	}
 
 	// 保存 master key
+	fmt.Println("putMasterKeysParams(...) => 保存`SecretKey`")
 	err = putMasterKeyParams(ns, pubParams, privParams)
 	if err != nil {
 		return maybeConvertDbError(err)
 	}
 
 	// 保存 crypto key
+	fmt.Println("putCryptoKeys(...) => 保存`CryptoKey`")
 	err = putCryptoKeys(ns, cryptoKeyPubEnc, cryptoKeyPrivEnc, cryptoKeyScriptEnc)
 	if err != nil {
 		return maybeConvertDbError(err)
@@ -330,15 +347,20 @@ func (m *Manager) watchOnly() bool {
 	return m.watchingOnly
 }
 
-func (m *Manager) IsLocked() bool {
-	m.mtx.RLock()
-	defer m.mtx.RUnlock()
+func (m *Manager) Lock() error {
+	if m.watchingOnly {
+		return managerError(ErrWatchingOnly, errWatchingOnly, nil)
+	}
 
-	return m.isLocked()
-}
+	m.mtx.Lock()
+	defer m.mtx.Unlock()
 
-func (m *Manager) isLocked() bool {
-	return m.locked
+	if m.locked {
+		return managerError(ErrLocked, errLocked, nil)
+	}
+
+	m.lock()
+	return nil
 }
 
 func (m *Manager) lock() {
@@ -370,7 +392,19 @@ func (m *Manager) lock() {
 	m.locked = true
 }
 
+func (m *Manager) IsLocked() bool {
+	m.mtx.RLock()
+	defer m.mtx.RUnlock()
+
+	return m.isLocked()
+}
+
+func (m *Manager) isLocked() bool {
+	return m.locked
+}
+
 func (m *Manager) Unlock(ns walletdb.ReadBucket, passphrase []byte) error {
+	fmt.Printf("【Manager】unlock manager `%s` \n", ns.Name())
 	if m.watchingOnly {
 		return managerError(ErrWatchingOnly, errWatchingOnly, nil)
 	}
@@ -379,6 +413,7 @@ func (m *Manager) Unlock(ns walletdb.ReadBucket, passphrase []byte) error {
 	defer m.mtx.Unlock()
 
 	if !m.locked {
+		fmt.Printf("【Manager】manager is unlocked, check passphrase hash \n")
 		saltedPassphrase := append(m.privPassphraseSalt[:],
 			passphrase...)
 		hashedPassphrase := sha512.Sum512(saltedPassphrase)
@@ -392,6 +427,7 @@ func (m *Manager) Unlock(ns walletdb.ReadBucket, passphrase []byte) error {
 	}
 
 	// 解锁 masterKeyPriv
+	fmt.Printf("【Manager】DeriveKey use {passphrase} \n")
 	if err := m.masterKeyPriv.DeriveKey(&passphrase); err != nil {
 		m.lock()
 		if err == snacl.ErrInvalidPassword {
@@ -403,6 +439,7 @@ func (m *Manager) Unlock(ns walletdb.ReadBucket, passphrase []byte) error {
 		return managerError(ErrCrypto, str, err)
 	}
 
+	fmt.Printf("【Manager】Decrypt `cryptoKeyPriv` use {masterKeyPriv} \n")
 	decryptedKey, err := m.masterKeyPriv.Decrypt(m.cryptoKeyPrivEncrypted)
 	if err != nil {
 		m.lock()
@@ -414,6 +451,7 @@ func (m *Manager) Unlock(ns walletdb.ReadBucket, passphrase []byte) error {
 
 	for _, manager := range m.scopedManagers {
 		for account, acctInfo := range manager.acctInfo {
+			fmt.Printf("【Manager】Decrypt `acctKeyPriv` use {cryptoKeyPriv} \n")
 			decrypted, err := m.cryptoKeyPriv.Decrypt(acctInfo.acctKeyEncrypted)
 			if err != nil {
 				m.lock()
@@ -480,7 +518,28 @@ func (m *Manager) NewScopedKeyManager(ns walletdb.ReadWriteBucket,
 
 	var rootPriv *hdkeychain.ExtendedKey
 	if !m.watchingOnly {
+		if m.locked {
+			return nil, managerError(ErrLocked, errLocked, nil)
+		}
 
+		masterRootPrivEnc, _ := fetchMasterHDKeys(ns)
+
+		if masterRootPrivEnc == nil {
+			return nil, managerError(ErrWatchingOnly, "", nil)
+		}
+
+		serializedMasterRootPriv, err := m.cryptoKeyPriv.Decrypt(masterRootPrivEnc)
+		if err != nil {
+			str := fmt.Sprintf("failed to decrypt master root serialized private key")
+			return nil, managerError(ErrCrypto, str, err)
+		}
+
+		rootPriv, err = hdkeychain.NewKeyFromString(string(serializedMasterRootPriv))
+		zero.Bytes(serializedMasterRootPriv)
+		if err != nil {
+			str := fmt.Sprintf("failed to create master extended private key")
+			return nil, managerError(ErrCrypto, str, err)
+		}
 	}
 
 	scopeBucket := ns.NestedReadWriteBucket(scopeBucketName)
@@ -571,11 +630,13 @@ func loadManager(ns walletdb.ReadBucket, pubPassphrase []byte,
 		return nil, maybeConvertDbError(err)
 	}
 
+	fmt.Println("fetchMasterKeyParams(...) => ")
 	masterKeyPubParams, masterKeyPrivParams, err := fetchMasterKeyParams(ns)
 	if err != nil {
 		return nil, maybeConvertDbError(err)
 	}
 
+	fmt.Println("fetchCryptoKeys(...) => ")
 	cryptoKeyPubEnc, cryptoKeyPrivEnc, cryptoKeyScriptEnc, err := fetchCryptoKeys(ns)
 	if err != nil {
 		return nil, maybeConvertDbError(err)
@@ -607,7 +668,7 @@ func loadManager(ns walletdb.ReadBucket, pubPassphrase []byte,
 		str := "invalid passphrase for master public key"
 		return nil, managerError(ErrWrongPassphrase, str, err)
 	}
-	fmt.Println("根据 `pubPassphrase` 派生出 master pub key 的原始对象")
+	fmt.Println("根据 `pubPassphrase` 恢复 masterKeyPub")
 
 	cryptoKeyPub := &cryptoKey{snacl.CryptoKey{}}
 	cryptoKeyPubCT, err := masterKeyPub.Decrypt(cryptoKeyPubEnc)
@@ -617,7 +678,7 @@ func loadManager(ns walletdb.ReadBucket, pubPassphrase []byte,
 	}
 	cryptoKeyPub.CopyBytes(cryptoKeyPubCT)
 	zero.Bytes(cryptoKeyPubCT)
-	fmt.Println("Decrypt Crypto Pub Key")
+	fmt.Println("根据 masterKeyPub, 恢复 CryptoKeyPub ")
 
 	var privPassphraseSalt [saltSize]byte
 	_, err = rand.Read(privPassphraseSalt[:])
@@ -625,6 +686,7 @@ func loadManager(ns walletdb.ReadBucket, pubPassphrase []byte,
 		str := "failed to read random source for passphrase salt"
 		return nil, managerError(ErrCrypto, str, err)
 	}
+	fmt.Println("生成保护私钥的随机数")
 
 	scopedManagers := make(map[KeyScope]*ScopedKeyManager)
 	err = forEachKeyScope(ns, func(scope KeyScope) error {
@@ -642,6 +704,7 @@ func loadManager(ns walletdb.ReadBucket, pubPassphrase []byte,
 				defaultPrivKeyCacheSize,
 			),
 		}
+		fmt.Printf("构建 ScopedKeyManager 对象 => %v \n", scope)
 
 		return nil
 	})
@@ -653,6 +716,7 @@ func loadManager(ns walletdb.ReadBucket, pubPassphrase []byte,
 		chainParams, &masterKeyPub, &masterKeyPriv,
 		cryptoKeyPub, cryptoKeyPrivEnc, cryptoKeyScriptEnc,
 		birthday, privPassphraseSalt, scopedManagers, watchingOnly)
+	fmt.Println("构建 Manager 对象")
 
 	for _, scopedManager := range scopedManagers {
 		scopedManager.rootManager = mgr

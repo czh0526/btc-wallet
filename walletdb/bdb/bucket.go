@@ -26,9 +26,12 @@ func (b *bucket) Get(key []byte) []byte {
 	return b.Bucket.Get(key)
 }
 
+func (b *bucket) ReadWriteCursor() walletdb.ReadWriteCursor {
+	return b.Bucket.Cursor()
+}
+
 func (b *bucket) ReadCursor() walletdb.ReadCursor {
-	//TODO implement me
-	panic("implement me")
+	return b.ReadWriteCursor()
 }
 
 func (b *bucket) NestedReadWriteBucket(key []byte) walletdb.ReadWriteBucket {
@@ -54,13 +57,18 @@ func (b *bucket) CreateBucket(key []byte) (walletdb.ReadWriteBucket, error) {
 }
 
 func (b *bucket) CreateBucketIfNotExists(key []byte) (walletdb.ReadWriteBucket, error) {
-	//TODO implement me
-	panic("implement me")
+	boltBucket, err := b.Bucket.CreateBucketIfNotExists(key)
+	if err != nil {
+		return nil, convertErr(err)
+	}
+	return &bucket{
+		Bucket: boltBucket,
+		name:   key,
+	}, nil
 }
 
 func (b *bucket) DeleteNestedBucket(key []byte) error {
-	//TODO implement me
-	panic("implement me")
+	return convertErr(b.Bucket.DeleteBucket(key))
 }
 
 func (b *bucket) Put(key, value []byte) error {
@@ -68,33 +76,25 @@ func (b *bucket) Put(key, value []byte) error {
 }
 
 func (b *bucket) Delete(key []byte) error {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (b *bucket) ReadWriteCursor() walletdb.ReadWriteCursor {
-	//TODO implement me
-	panic("implement me")
+	return convertErr(b.Bucket.Delete(key))
 }
 
 func (b *bucket) Tx() walletdb.ReadWriteTx {
-	//TODO implement me
-	panic("implement me")
+	return &transaction{
+		boltTx: b.Bucket.Tx(),
+	}
 }
 
 func (b *bucket) NextSequence() (uint64, error) {
-	//TODO implement me
-	panic("implement me")
+	return b.Bucket.NextSequence()
 }
 
 func (b *bucket) SetSequence(v uint64) error {
-	//TODO implement me
-	panic("implement me")
+	return b.Bucket.SetSequence(v)
 }
 
 func (b *bucket) Sequence() uint64 {
-	//TODO implement me
-	panic("implement me")
+	return b.Bucket.Sequence()
 }
 
 var _ walletdb.ReadWriteBucket = (*bucket)(nil)

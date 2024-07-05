@@ -1,7 +1,6 @@
 package waddrmgr
 
 import (
-	"errors"
 	"fmt"
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcutil"
@@ -72,6 +71,10 @@ var (
 			InternalAddrType: PubKeyHash,
 		},
 	}
+
+	ImportedDerivationPath = DerivationPath{
+		InternalAccount: ImportedAddrAccount,
+	}
 )
 
 type unlockDeriveInfo struct {
@@ -117,7 +120,17 @@ func (s *ScopedKeyManager) Scope() KeyScope {
 }
 
 func (s *ScopedKeyManager) Close() {
-	fmt.Println("ScopedKeyManager::Close() was not implemented yet.")
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	s.zeroSensitivePublicData()
+}
+
+func (s *ScopedKeyManager) zeroSensitivePublicData() {
+	for _, acctInfo := range s.acctInfo {
+		acctInfo.acctKeyPub.Zero()
+		acctInfo.acctKeyPub = nil
+	}
 }
 
 func (s *ScopedKeyManager) deriveKeyFromPath(ns walletdb.ReadBucket,
@@ -170,6 +183,7 @@ func (s *ScopedKeyManager) deriveKey(acctInfo *accountInfo,
 	return addressKey, nil
 }
 
+// 从`密钥` => `地址`
 func (s *ScopedKeyManager) keyToManaged(derivedKey *hdkeychain.ExtendedKey,
 	derivationPath DerivationPath, acctInfo *accountInfo) (ManagedAddress, error) {
 
@@ -301,6 +315,7 @@ func (s *ScopedKeyManager) loadAccountInfo(ns walletdb.ReadBucket,
 		Index:                index,
 		MasterKeyFingerprint: acctInfo.masterKeyFingerprint,
 	}
+
 	lastIntKey, err := s.deriveKey(acctInfo, branch, index, hasPrivateKey)
 	if err != nil {
 		return nil, err
@@ -352,7 +367,247 @@ func (s *ScopedKeyManager) nextAddresses(ns walletdb.ReadWriteBucket,
 	}
 	defer branchKey.Zero()
 
-	return nil, errors.New("nextAddresses() has not be implemented yet")
+	addressInfo := make([]*unlockDeriveInfo, 0, numAddresses)
+	for i := uint32(0); i < numAddresses; i++ {
+		var nextKey *hdkeychain.ExtendedKey
+		// 尝试构建`ExtendedKey`
+		for {
+			key, err := branchKey.DeriveNonStandard(i)
+			if err != nil {
+				if err == hdkeychain.ErrInvalidChild {
+					nextIndex++
+					continue
+				}
+
+				str := fmt.Sprintf("failed to generate child %d", nextIndex)
+				return nil, managerError(ErrKeyChain, str, err)
+			}
+			key.SetNet(s.rootManager.chainParams)
+
+			nextIndex++
+			nextKey = key
+			break
+		}
+
+		// 为`account`构建一个派生路径
+		derivationPath := DerivationPath{
+			InternalAccount:      account,
+			Account:              acctKey.ChildIndex(),
+			Branch:               branchNum,
+			Index:                nextIndex - 1,
+			MasterKeyFingerprint: acctInfo.masterKeyFingerprint,
+		}
+
+		// 创建一个`管理型地址`
+		addr, err := newManagedAddressFromExtKey(
+			s, derivationPath, nextKey, addrType, acctInfo)
+		if err != nil {
+			return nil, err
+		}
+		if internal {
+			addr.internal = true
+		}
+		managedAddr := addr
+		nextKey.Zero()
+
+		info := unlockDeriveInfo{
+			managedAddr: managedAddr,
+			branch:      branchNum,
+			index:       nextIndex - 1,
+		}
+		addressInfo = append(addressInfo, &info)
+	}
+
+	for _, info := range addressInfo {
+		ma := info.managedAddr
+		addressID := ma.Address().ScriptAddress()
+
+		switch a := ma.(type) {
+		case *managedAddress:
+			// 保存地址
+			err := putChainedAddress(
+				ns, &s.scope, addressID, account, ssFull,
+				info.branch, info.index, adtChain)
+			if err != nil {
+				return nil, maybeConvertDbError(err)
+			}
+		case *scriptAddress:
+			encryptedHash, err := s.rootManager.cryptoKeyPub.Encrypt(
+				a.AddrHash())
+			if err != nil {
+				str := fmt.Sprintf("failed to encrypt script hash %x", a.AddrHash())
+				return nil, managerError(ErrCrypto, str, err)
+			}
+			// 保存地址
+			err = putScriptAddress(
+				ns, &s.scope, a.AddrHash(), ImportedAddrAccount, ssNone, encryptedHash, a.scriptEncrypted)
+			if err != nil {
+				return nil, maybeConvertDbError(err)
+			}
+		}
+
+		diskAddr, err := s.loadAndCacheAddress(ns, ma.Address())
+		if err != nil {
+			return nil, maybeConvertDbError(err)
+		}
+
+		if ma.Address().String() != diskAddr.Address().String() {
+			delete(s.addrs, addrKey(diskAddr.Address().ScriptAddress()))
+		}
+
+		return nil, fmt.Errorf("%w (disk read): expected %v, got %v",
+			ErrAddrMismatch, diskAddr.Address().String(), ma.Address().String())
+	}
+
+	managedAddresses := make([]ManagedAddress, 0, len(addressInfo))
+	for _, info := range addressInfo {
+		ma := info.managedAddr
+		managedAddresses = append(managedAddresses, ma)
+	}
+
+	onCommit := func() {
+		s.mtx.Lock()
+		defer s.mtx.Unlock()
+
+		for _, info := range addressInfo {
+			ma := info.managedAddr
+			s.addrs[addrKey(ma.Address().ScriptAddress())] = ma
+
+			if s.rootManager.isLocked() && !watchOnly {
+				s.deriveOnUnlock = append(s.deriveOnUnlock, info)
+			}
+		}
+
+		ma := addressInfo[len(addressInfo)-1].managedAddr
+		if internal {
+			acctInfo.nextInternalIndex = nextIndex
+			acctInfo.lastInternalAddr = ma
+		} else {
+			acctInfo.nextExternalIndex = nextIndex
+			acctInfo.lastExternalAddr = ma
+		}
+	}
+	ns.Tx().OnCommit(onCommit)
+
+	return managedAddresses, nil
+}
+
+func (s *ScopedKeyManager) loadAndCacheAddress(ns walletdb.ReadBucket,
+	address btcutil.Address) (ManagedAddress, error) {
+
+	rowInterface, err := fetchAddress(ns, &s.scope, address.ScriptAddress())
+	if err != nil {
+		if merr, ok := err.(*ManagerError); ok {
+			desc := fmt.Sprintf("failed to fetch address `%s`: %v",
+				address.ScriptAddress(), merr.Description)
+			merr.Description = desc
+			return nil, merr
+		}
+		return nil, maybeConvertDbError(err)
+	}
+
+	managedAddr, err := s.rowInterfaceToManaged(ns, rowInterface)
+	if err != nil {
+		return nil, err
+	}
+
+	s.addrs[addrKey(managedAddr.Address().ScriptAddress())] = managedAddr
+	return managedAddr, nil
+}
+
+func (s *ScopedKeyManager) rowInterfaceToManaged(ns walletdb.ReadBucket,
+	rowInterface interface{}) (ManagedAddress, error) {
+
+	switch row := rowInterface.(type) {
+	case *dbChainAddressRow:
+		return s.chainAddressRowToManaged(ns, row)
+	case *dbImportedAddressRow:
+		return s.importedAddressRowToManaged(row)
+	case *dbScriptAddressRow:
+		return s.scriptAddressRowToManaged(row)
+	case *dbWitnessScriptAddressRow:
+		return s.witnessScriptAddressRowToManaged(row)
+	}
+
+	str := fmt.Sprintf("unknown address type: %T", rowInterface)
+	return nil, managerError(ErrDatabase, str, nil)
+}
+
+func (s *ScopedKeyManager) chainAddressRowToManaged(ns walletdb.ReadBucket,
+	row *dbChainAddressRow) (ManagedAddress, error) {
+
+	private := !s.rootManager.isLocked() && !s.rootManager.watchOnly()
+
+	addressKey, acctKey, masterKeyFingerprint, err := s.deriveKeyFromPath(
+		ns, row.account, row.branch, row.index, private)
+	if err != nil {
+		return nil, err
+	}
+
+	acctInfo, err := s.loadAccountInfo(ns, row.account)
+	if err != nil {
+		return nil, err
+	}
+	return s.keyToManaged(
+		addressKey, DerivationPath{
+			InternalAccount:      row.account,
+			Account:              acctKey.ChildIndex(),
+			Branch:               row.branch,
+			Index:                row.index,
+			MasterKeyFingerprint: masterKeyFingerprint,
+		}, acctInfo)
+}
+
+func (s *ScopedKeyManager) importedAddressRowToManaged(row *dbImportedAddressRow) (ManagedAddress, error) {
+	pubBytes, err := s.rootManager.cryptoKeyPub.Decrypt(row.encryptedPubKey)
+	if err != nil {
+		str := "Failed to decrypted public key for imported address"
+		return nil, managerError(ErrCrypto, str, err)
+	}
+
+	pubKey, err := btcec.ParsePubKey(pubBytes)
+	if err != nil {
+		str := "invalid public key for imported address"
+		return nil, managerError(ErrCrypto, str, err)
+	}
+
+	compressed := len(pubBytes) == btcec.PubKeyBytesLenCompressed
+	ma, err := newManagedAddressWithoutPrivKey(
+		s, ImportedDerivationPath, pubKey, compressed,
+		s.addrSchema.ExternalAddrType)
+	if err != nil {
+		return nil, err
+	}
+	ma.privKeyEncrypted = row.encryptedPrivKey
+	ma.imported = true
+
+	return ma, nil
+}
+
+func (s *ScopedKeyManager) scriptAddressRowToManaged(
+	row *dbScriptAddressRow) (ManagedAddress, error) {
+
+	scriptHash, err := s.rootManager.cryptoKeyPub.Decrypt(row.encryptedHash)
+	if err != nil {
+		str := "failed to decrypt imported script hash"
+		return nil, managerError(ErrCrypto, str, err)
+	}
+
+	return newScriptAddress(s, row.account, scriptHash, row.encryptedScript)
+}
+
+func (s *ScopedKeyManager) witnessScriptAddressRowToManaged(
+	row *dbWitnessScriptAddressRow) (ManagedAddress, error) {
+
+	scriptHash, err := s.rootManager.cryptoKeyPub.Decrypt(row.encryptedHash)
+	if err != nil {
+		str := "failed to decrypt imported witness script hash"
+		return nil, managerError(ErrCrypto, str, err)
+	}
+
+	return newWitnessScriptAddress(
+		s, row.account, scriptHash, row.encryptedScript,
+		row.witnessVersion, row.isSecretScript)
 }
 
 func (s *ScopedKeyManager) fetchUsed(ns walletdb.ReadBucket,
@@ -402,6 +657,22 @@ func (s *ScopedKeyManager) NewAccount(ns walletdb.ReadWriteBucket, name string) 
 	return account, nil
 }
 
+func (s *ScopedKeyManager) NewRawAccount(ns walletdb.ReadWriteBucket, number uint32) error {
+	if s.rootManager.WatchOnly() {
+		return managerError(ErrWatchingOnly, errWatchingOnly, nil)
+	}
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	if s.rootManager.IsLocked() {
+		return managerError(ErrLocked, errLocked, nil)
+	}
+
+	name := fmt.Sprintf("act:%v", number)
+	return s.newAccount(ns, number, name)
+}
+
 func (s *ScopedKeyManager) newAccount(ns walletdb.ReadWriteBucket,
 	account uint32, name string) error {
 
@@ -412,7 +683,7 @@ func (s *ScopedKeyManager) newAccount(ns walletdb.ReadWriteBucket,
 	_, err := s.lookupAccount(ns, name)
 	if err == nil {
 		str := "account with the same name already exists"
-		return managerError(ErrAccountNotFound, str, err)
+		return managerError(ErrDuplicateAccount, str, err)
 	}
 
 	_, coinTypePrivEnc, err := fetchCoinTypeKeys(ns, &s.scope)
@@ -456,6 +727,7 @@ func (s *ScopedKeyManager) newAccount(ns walletdb.ReadWriteBucket,
 		return managerError(ErrCrypto, str, err)
 	}
 
+	fmt.Println("\nputDefaultAccountInfo(...) => ")
 	err = putDefaultAccountInfo(ns, &s.scope,
 		account, acctPubEnc, acctPrivEnc, 0, 0, name)
 	if err != nil {
@@ -474,4 +746,122 @@ func (s *ScopedKeyManager) LookupAccount(ns walletdb.ReadBucket, name string) (u
 
 func (s *ScopedKeyManager) lookupAccount(ns walletdb.ReadBucket, name string) (uint32, error) {
 	return fetchAccountByName(ns, &s.scope, name)
+}
+
+func (s *ScopedKeyManager) NextExternalAddresses(ns walletdb.ReadWriteBucket,
+	account uint32, numAddresses uint32) ([]ManagedAddress, error) {
+
+	if account > MaxAccountNum {
+		err := managerError(ErrAccountNumTooHigh, errAcctTooHigh, nil)
+		return nil, err
+	}
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	return s.nextAddresses(ns, account, numAddresses, false)
+}
+
+func (s *ScopedKeyManager) NextInternalAddresses(ns walletdb.ReadWriteBucket,
+	account uint32, numAddresses uint32) ([]ManagedAddress, error) {
+
+	if account > MaxAccountNum {
+		err := managerError(ErrAccountNumTooHigh, errAcctTooHigh, nil)
+		return nil, err
+	}
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	return s.nextAddresses(ns, account, numAddresses, true)
+}
+
+func (s *ScopedKeyManager) DeriveFromKeyPath(ns walletdb.ReadBucket,
+	kp DerivationPath) (ManagedAddress, error) {
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	watchOnly := s.rootManager.WatchOnly()
+	private := !s.rootManager.IsLocked() && !watchOnly
+
+	addrKey, _, _, err := s.deriveKeyFromPath(
+		ns, kp.InternalAccount, kp.Branch, kp.Index, private)
+	if err != nil {
+		return nil, err
+	}
+
+	acctInfo, err := s.loadAccountInfo(ns, kp.InternalAccount)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.keyToManaged(addrKey, kp, acctInfo)
+}
+
+func (s *ScopedKeyManager) AccountProperties(ns walletdb.ReadBucket,
+	account uint32) (*AccountProperties, error) {
+
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	props := &AccountProperties{
+		AccountNumber: account,
+		KeyScope:      s.scope,
+	}
+
+	if account != ImportedAddrAccount {
+		acctInfo, err := s.loadAccountInfo(ns, account)
+		if err != nil {
+			return nil, err
+		}
+		props.AccountName = acctInfo.acctName
+		props.ExternalKeyCount = acctInfo.nextExternalIndex
+		props.InternalKeyCount = acctInfo.nextInternalIndex
+		props.AccountPubKey = acctInfo.acctKeyPub
+		props.MasterKeyFingerprint = acctInfo.masterKeyFingerprint
+		props.IsWatchOnly = s.rootManager.WatchOnly() || acctInfo.acctKeyPriv == nil
+		props.AddrSchema = acctInfo.addrSchema
+
+		isDefaultKeyScope := IsDefaultScope(s.scope)
+		if acctInfo.acctType == accountDefault && isDefaultKeyScope {
+			props.AccountPubKey, err = s.cloneKeyWithVersion(acctInfo.acctKeyPub)
+			if err != nil {
+				return nil, fmt.Errorf("failed to retrieve account public key: %v", err)
+			}
+		}
+
+	} else {
+		props.AccountName = ImportedAddrAccountName
+		props.IsWatchOnly = s.rootManager.WatchOnly()
+
+		var importedKeyCount uint32
+		count := func(interface{}) error {
+			importedKeyCount++
+			return nil
+		}
+		err := forEachAccountAddress(ns, &s.scope, ImportedAddrAccount, count)
+		if err != nil {
+			return nil, err
+		}
+		props.ImportedKeyCount = importedKeyCount
+	}
+
+	return props, nil
+}
+
+func IsDefaultScope(scope KeyScope) bool {
+	for _, defaultScope := range DefaultKeyScopes {
+		if defaultScope == scope {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (s *ScopedKeyManager) cloneKeyWithVersion(key *hdkeychain.ExtendedKey) (
+	*hdkeychain.ExtendedKey, error) {
+
+	return nil, fmt.Errorf("cloneKeyWithVersion(...) has not be implemented")
 }

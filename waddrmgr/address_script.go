@@ -95,3 +95,22 @@ func (a *scriptAddress) Script() ([]byte, error) {
 
 	return a.unlock(a.manager.rootManager.cryptoKeyScript)
 }
+
+func newScriptAddress(m *ScopedKeyManager, account uint32,
+	scriptHash, scriptEncrypted []byte) (*scriptAddress, error) {
+
+	address, err := btcutil.NewAddressScriptHashFromHash(
+		scriptHash, m.rootManager.chainParams)
+	if err != nil {
+		return nil, err
+	}
+
+	return &scriptAddress{
+		baseScriptAddress: baseScriptAddress{
+			manager:         m,
+			account:         account,
+			scriptEncrypted: scriptEncrypted,
+		},
+		address: address,
+	}, nil
+}

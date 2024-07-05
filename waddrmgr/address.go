@@ -72,6 +72,11 @@ type ManagedScriptAddress interface {
 	Script() ([]byte, error)
 }
 
+type ManagedTaprootScriptAddress interface {
+	ManagedScriptAddress
+	TaprootScript() (*Tapscript, error)
+}
+
 var _ ManagedPubKeyAddress = (*managedAddress)(nil)
 
 var _ ManagedScriptAddress = (*scriptAddress)(nil)
